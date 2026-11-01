@@ -1,0 +1,35 @@
+# 환경 변수·비밀 값
+.env
+.env.*
+!.env.example
+application-secret.yml
+application-local.yml
+
+# Java / Gradle / Maven
+.gradle/
+build/
+target/
+*.class
+
+# Node
+node_modules/
+dist/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 업로드 파일·로컬 DB
+uploads/
+*.sqlite3
+*.db
+
+# 로그
+*.log
+
+# 에디터·OS
+.idea/
+.vscode/
+.DS_Store
