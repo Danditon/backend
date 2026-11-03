@@ -29,14 +29,16 @@
 | 의존성 관리 | Spring Dependency Management 플러그인 1.1.7 |
 | 데이터·보안·검증 | Spring Data JPA, Spring Security, Spring Validation |
 | 개발 도구 | Lombok |
-| 데이터베이스 드라이버 | MySQL Connector/J (연결 정보 미설정) |
+| 데이터베이스 드라이버 | MySQL Connector/J (local/prod), H2 (테스트 전용) |
 | 테스트 | JUnit 5, Spring Boot 테스트 스타터 |
 
 개별 라이브러리 버전은 Spring Boot 의존성 관리에 따릅니다. 배포 환경은 아직 정해지지 않았습니다.
 
 ## 실행 방법
 
-Gradle Wrapper로 `bootJar`를 실행해 애플리케이션 JAR을 빌드할 수 있습니다 (`./gradlew bootJar`, Windows: `.\gradlew.bat bootJar`). 실제 실행과 Spring 컨텍스트 테스트에는 별도의 datasource 설정이 필요합니다.
+Gradle Wrapper로 `bootJar`를 실행해 애플리케이션 JAR을 빌드할 수 있습니다 (`./gradlew bootJar`, Windows: `.\gradlew.bat bootJar`). 테스트는 `test` 프로필의 인메모리 H2를 사용하므로 외부 DB 없이 `./gradlew test`로 실행할 수 있습니다.
+
+애플리케이션을 실행할 때는 `SPRING_PROFILES_ACTIVE`를 `local` 또는 `prod`로 설정하고 해당 프로필의 DB 접속값을 환경 변수로 전달합니다. 필요한 변수 이름은 [`.env.example`](.env.example)을 참고하세요. `.env.example`은 예시 파일이며 Spring Boot가 자동으로 읽지는 않습니다. multipart 파일·요청 제한은 기본 10MB이고, 환경 변수로 변경할 수 있습니다.
 
 ## 협업
 
