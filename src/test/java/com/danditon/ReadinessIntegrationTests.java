@@ -1,7 +1,6 @@
 package com.danditon;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.net.URI;
 import java.net.CookieManager;
@@ -120,14 +119,18 @@ class ReadinessIntegrationTests {
 	}
 
 	@Test
-	void productionBindsToAllContainerInterfacesWithoutChangingSchemaPolicy() throws Exception {
-		var properties = new YamlPropertySourceLoader()
+	void productionBindsToAllContainerInterfacesAndMySqlProfilesUpdateSchema() throws Exception {
+		var production = new YamlPropertySourceLoader()
 			.load("production", new ClassPathResource("application-prod.yaml")).get(0);
-		assertEquals("0.0.0.0", properties.getProperty("server.address"));
-		assertEquals(8080, properties.getProperty("server.port"));
-		assertNull(properties.getProperty("spring.jpa.hibernate.ddl-auto"));
+		var local = new YamlPropertySourceLoader()
+			.load("local", new ClassPathResource("application-local.yaml")).get(0);
+		assertEquals("0.0.0.0", production.getProperty("server.address"));
+		assertEquals(8080, production.getProperty("server.port"));
+		assertEquals("update", production.getProperty("spring.jpa.hibernate.ddl-auto"));
+		assertEquals("update", local.getProperty("spring.jpa.hibernate.ddl-auto"));
 		assertEquals("0.0.0.0", context.getEnvironment().getProperty("server.address"));
-		System.out.println("PRODUCTION_BIND address=0.0.0.0 port=8080 ddl-auto=unchanged");
+		assertEquals("update", context.getEnvironment().getProperty("spring.jpa.hibernate.ddl-auto"));
+		System.out.println("PRODUCTION_BIND address=0.0.0.0 port=8080 ddl-auto=update");
 	}
 
 	private void assertHealth(String status, int code) throws Exception {

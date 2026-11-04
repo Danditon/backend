@@ -21,9 +21,9 @@ class DanditonApplicationTests {
 	}
 
 	@Test
-	void multipartLimitsAreTenMegabytes() {
+	void multipartAllowsTenMegabyteFileWithRequestOverhead() {
 		assertEquals(DataSize.ofMegabytes(10), multipartProperties.getMaxFileSize());
-		assertEquals(DataSize.ofMegabytes(10), multipartProperties.getMaxRequestSize());
+		assertEquals(DataSize.ofMegabytes(12), multipartProperties.getMaxRequestSize());
 	}
 
 }

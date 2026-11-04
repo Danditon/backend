@@ -3,6 +3,9 @@ spring:
     url: ${PROD_DB_URL}
     username: ${PROD_DB_USERNAME}
     password: ${PROD_DB_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: update
 
 server:
   address: 0.0.0.0

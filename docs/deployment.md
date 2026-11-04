@@ -171,7 +171,7 @@ curl -i --max-time 10 http://127.0.0.1:8080/actuator/health/readiness
 
 `STALE_RELEASE`, `RELEASE_COLLISION`, `DIGEST_MISMATCH`, `DATABASE_NOT_HEALTHY`, `OPERATOR_RECONCILIATION_REQUIRED`는 실패다. 파일/digest를 맞추려고 이전 release를 덮어쓰지 않는다. DB가 아프면 원인을 고치고 정상 상태를 먼저 확인한다. 실패 실행의 Actions 상태와 종료 코드를 보존한다.
 
-앱 활성화 후 실패하면 스크립트는 `rollback.json`에 저장한 직전 앱 이미지/Compose/env로 되돌려 readiness와 메타데이터를 확인한다. `ROLLED_BACK`이어도 실패 배포는 nonzero/red다. 최초 배포 실패는 앱을 멈추고 DB/transaction을 남긴다. HUP/INT/TERM은 복구를 시도하지만 SIGKILL·전원 손실·복구 자체 실패까지 자동 해결하지 않는다. 롤백은 DB migration을 되돌리지 않는다. prod ddl-auto를 임의 변경하지 않는다.
+앱 활성화 후 실패하면 스크립트는 `rollback.json`에 저장한 직전 앱 이미지/Compose/env로 되돌려 readiness와 메타데이터를 확인한다. `ROLLED_BACK`이어도 실패 배포는 nonzero/red다. 최초 배포 실패는 앱을 멈추고 DB/transaction을 남긴다. HUP/INT/TERM은 복구를 시도하지만 SIGKILL·전원 손실·복구 자체 실패까지 자동 해결하지 않는다. local/prod는 명시적으로 `ddl-auto: update`를 사용하므로 애플리케이션 롤백이 이미 적용된 스키마 변경을 되돌리지는 않는다. 장애 대응 중 이 정책을 임의 변경하지 않는다.
 
 `transaction.json`이 남으면 다음 배포를 중지하고 운영자가 아래 순서로 복구한다.
 
