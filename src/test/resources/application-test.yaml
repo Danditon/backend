@@ -4,3 +4,7 @@ spring:
     driver-class-name: org.h2.Driver
     username: sa
     password: ''
+
+security:
+  jwt:
+    secret-base64: aW50ZWdyYXRpb24tb25seS0zMi1ieXRlLXNlY3JldCEh

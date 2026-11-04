@@ -104,7 +104,11 @@ ssh "${OPERATOR_OPTS[@]}" "ubuntu@$EC2_HOST" \
   'sudo bash /home/ubuntu/danditon-bootstrap/ops/host/bootstrap.sh /home/ubuntu/danditon-bootstrap/deploy.pub'
 ```
 
-[bootstrap](../ops/host/bootstrap.sh)은 공식 Docker Ubuntu 패키지, Compose plugin, Nginx/fail2ban/age, 2 GiB swap, SSH/sudoers/백업 timer를 설치한다. [비밀 초기화](../ops/host/init-secrets.sh)는 호스트에서 난수를 생성하고 root:root 600 `/etc/danditon/.env`에 `MYSQL_ROOT_PASSWORD`, `PROD_DB_PASSWORD`, `PROD_DB_USERNAME`, `PROD_DB_URL`을 기록한다. 기존 정상 파일은 보존하며 새 DB 비밀번호로 덮어쓰지 않는다. `.env.example`은 이름 목록일 뿐 배포용 비밀 파일이 아니다. root-invoked Compose가 host env 다음 release `image.env`를 읽는다.
+[bootstrap](../ops/host/bootstrap.sh)은 공식 Docker Ubuntu 패키지, Compose plugin, Nginx/fail2ban/age, 2 GiB swap, SSH/sudoers/백업 timer를 설치한다. [비밀 초기화](../ops/host/init-secrets.sh)는 호스트에서 난수를 생성하고 root:root 600 `/etc/danditon/.env`에 `MYSQL_ROOT_PASSWORD`, `PROD_DB_PASSWORD`, `PROD_DB_USERNAME`, `PROD_DB_URL`, `JWT_SECRET_BASE64`를 기록한다. JWT 키는 32바이트 난수를 한 줄의 표준 Base64로 인코딩한다. 기존 정상 DB 값과 유효한 JWT 키는 파일 바이트 그대로 보존한다. `.env.example`은 이름 목록일 뿐 배포용 비밀 파일이 아니다. root-invoked Compose가 host env 다음 release `image.env`를 읽는다.
+
+기존 DB 전용 `.env`는 JWT 설정을 요구하는 앱 배포 전에 검토된 `ops/host/init-secrets.sh`를 운영자 셸에서 `sudo bash ops/host/init-secrets.sh /etc/danditon`으로 실행해 이관한다. 같은 `flock` 안에서 기존 바이트를 유지한 임시 파일에 JWT 키만 추가하고 원자적으로 교체하며 root:root 600을 유지한다. 재실행은 키를 바꾸지 않는다. symlink, 다른 소유자/권한, 누락·중복·빈 DB 항목, 중복 JWT 항목, 잘못된 Base64 또는 디코딩 후 32바이트 미만인 JWT 키는 변경 없이 실패한다. lock은 최대 60초 기다리며, 실패한 파일을 지워 DB 비밀번호를 재생성하는 방식으로 복구하지 않는다. 비밀값은 출력하거나 GitHub에 등록하지 않는다.
+
+JWT 검증은 HS256 공유키를 사용한다. 향후 로그인/토큰 발급 기능의 계약은 access token 유효기간 24시간이며, 현재 초기화 작업이 로그인 API나 발급 기능을 제공하는 것은 아니다.
 
 `danditon-deploy`는 일반 docker 그룹에 넣지 않고 `sudo -n /usr/bin/docker`만 sudoers에 둔다. **임의 Docker 인자를 허용하는 이 권한은 root와 동등하다.** 호스트 파일 마운트 등으로 비밀을 읽거나 바꿀 수 있으므로 `.env` 직접 읽기 금지는 배포 계정 침해에 대한 격리 경계가 아니다. CI workflow/배포 키 탈취는 호스트 전체 침해로 처리한다. [Docker 보안 설명](https://docs.docker.com/engine/security/).
 
@@ -203,6 +207,8 @@ rm -- /tmp/danditon-live-rollback.log
 배포·백업·다른 장애 시험과 겹치지 않는다. `LIVE_ROLLBACK_FAILED OPERATOR_RECONCILIATION_REQUIRED`가 나오거나 연결이 끊기면 재시도하거나 marker/QA override를 지우지 말고 위 중단 복구 절차로 실제 앱/DB/기록을 대조한다. 실패 시 어댑터는 조사에 필요한 transaction과 QA 파일을 보존한다. 이 어댑터는 `ops/tests`에만 있고 정상 `deploy.sh`에는 시험 인자가 없다.
 
 ## 키 교체·폐기와 SSH 분실
+
+`JWT_SECRET_BASE64`는 단일 HMAC 키다. 초기화기를 재실행해도 자동 교체되지 않으며 다중 키 동시 검증·무중단 키 순환은 지원하지 않는다. 계획된 교체나 유출 대응에서는 같은 비밀 파일 lock을 확보한 운영자가 새 32바이트 이상 난수의 한 줄 표준 Base64 값으로 해당 항목만 원자 교체하고 root:root 600을 유지한 뒤 앱 컨테이너를 재생성한다. DB 항목은 보존한다. 새 키를 적용한 앱은 옛 키로 서명된 만료 전 토큰도 모두 거부하므로 사용자 재인증이 필요하다. 키 값이나 파일 전체를 명령행 인자·로그·Git에 남기지 않는다. 앱 적용과 재인증 영향을 운영 장부에 기록한다.
 
 운영 키와 배포 키는 공유하지 않는다. 예정된 교체 때 새 공개키를 기존 키와 잠시 함께 `authorized_keys`에 설치하고 소유자/700 디렉터리/600 파일 권한을 유지한다. `danditon-deploy`의 새 줄에는 기존 `restrict` 옵션을 유지한다. 새 키로 별도 세션 인증을 확인한 다음 GitHub `EC2_SSH_PRIVATE_KEY`를 교체하고 최신 develop 배포를 확인한다. 그 뒤 옛 공개키 줄과 옛 private key 사본을 폐기한다. operator는 새 operator 세션이 sudo와 터널까지 동작하는 것을 확인한 후 옛 키를 제거한다. bootstrap 재실행은 배포 authorized_keys를 제공된 한 키로 교체하므로 이중 키 교체 중에는 사용하지 않는다.
 
