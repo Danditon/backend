@@ -47,6 +47,14 @@ printf 'pid %s/nginx.pid;\nerror_log %s/nginx-error.log;\nevents {}\nhttp { incl
 sudo nginx -t -c "$fixture/nginx-runtime"
 sudo nginx -c "$fixture/nginx-runtime" -g 'daemon off;' &
 nginx_pid=$!
+code=''
+for _attempt in {1..50}; do
+    code=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+        --data-binary ready "http://127.0.0.1:$nginx_port/upload" || true)
+    [[ $code == 204 ]] && break
+    sleep 0.1
+done
+[[ $code == 204 ]]
 truncate -s 10M "$fixture/photo.bin"
 code=$(curl --silent --output /dev/null --write-out '%{http_code}' \
     --form "photo=@$fixture/photo.bin;type=image/jpeg" \
