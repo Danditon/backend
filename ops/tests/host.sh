@@ -30,7 +30,11 @@ sudo nginx -t -c "$fixture/nginx"
 printf 'invalid_nginx;\n' >> "$fixture/nginx"
 if sudo nginx -t -c "$fixture/nginx" >/dev/null 2>&1; then exit 1; fi
 sudo visudo -cf ops/sudoers/danditon-deploy
+[[ $(jq -r '."log-driver"' ops/docker/daemon.json) == json-file ]]
+[[ $(jq -r '."log-opts"."max-size"' ops/docker/daemon.json) == 10m ]]
+[[ $(jq -r '."log-opts"."max-file"' ops/docker/daemon.json) == 3 ]]
+grep -Fq 'cmp -s "$source_dir/docker/daemon.json" /etc/docker/daemon.json' ops/host/bootstrap.sh
 cp -r /etc/fail2ban "$fixture/fail2ban"
 cp ops/fail2ban/danditon.local "$fixture/fail2ban/jail.d/danditon.local"
 sudo fail2ban-client -c "$fixture/fail2ban" -t
-echo SSH_NGINX_SUDOERS_VALID_AND_MALFORMED_REJECTED
+echo SSH_NGINX_SUDOERS_DOCKER_LOGS_VALID_AND_MALFORMED_REJECTED

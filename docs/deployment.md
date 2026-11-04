@@ -260,7 +260,7 @@ PASS는 pipeline exit 0, 기대한 schema table count, `RESTORE_VERIFIED_ISOLATE
 
 ## 디스크·비용·종료
 
-매일 호스트에서 `df -h / /var/lib/docker /var/backups/danditon`, `df -i /`, `sudo docker system df`, `sudo journalctl --disk-usage`, `free -m`, `swapon --show`를 확인한다. 20 GiB에는 image/DB/log/backup/swap이 함께 들어간다. 여유 공간이 부족하면 새 배포를 멈추고 어떤 경로가 늘었는지 확인한다. current/previous/transaction이 참조하는 이미지·release와 DB volume은 보존한다. 검증된 외부 사본이 있는 **개별 오래된 암호문**, 참조되지 않는 **개별 이미지 ID**만 목록을 검토한 뒤 지운다. broad prune으로 공간을 확보하지 않는다. 로그 회전은 host Docker 설정으로 제한하며 DB 증가가 원인이면 별도 용량 계획이 필요하다.
+매일 호스트에서 `df -h / /var/lib/docker /var/backups/danditon`, `df -i /`, `sudo docker system df`, `sudo journalctl --disk-usage`, `free -m`, `swapon --show`를 확인한다. 20 GiB에는 image/DB/log/backup/swap이 함께 들어간다. 여유 공간이 부족하면 새 배포를 멈추고 어떤 경로가 늘었는지 확인한다. current/previous/transaction이 참조하는 이미지·release와 DB volume은 보존한다. 검증된 외부 사본이 있는 **개별 오래된 암호문**, 참조되지 않는 **개별 이미지 ID**만 목록을 검토한 뒤 지운다. broad prune으로 공간을 확보하지 않는다. 컨테이너 로그는 host Docker의 `json-file` 드라이버에서 파일당 10 MiB, 최대 3개로 제한한다. 기존 `/etc/docker/daemon.json`이 이 설정과 다르면 bootstrap은 덮어쓰지 않고 중단하므로 운영자가 병합·검증한 뒤 재실행한다. DB 증가가 원인이면 별도 용량 계획이 필요하다.
 
 2026-11-04 서울 조사 기준 730시간 월 모델은 t3.small `730 × $0.026 = $18.98`, gp3 20 GiB `20 × $0.0912 = $1.824`, EIP 1개 `730 × $0.005 = $3.65`, 합계 **약 $24.45/월**이다. 이는 고정 자원 기준이며 상한이 아니다. [EC2 요금](https://aws.amazon.com/ec2/pricing/on-demand/), [EBS 지역 요금](https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ebs.json), [IPv4 요금](https://aws.amazon.com/vpc/pricing/)을 생성/인계 때 재확인한다. 사용 중/미연결 EIP 모두 과금되고 stop으로 EBS/IP 비용이 없어지지 않는다.
 

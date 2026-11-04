@@ -32,7 +32,17 @@ Signed-By: /etc/apt/keyrings/docker.asc
 EOF
 apt-get update
 apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-systemctl enable --now docker
+install -d -m 755 /etc/docker
+if [[ -e /etc/docker/daemon.json ]]; then
+    cmp -s "$source_dir/docker/daemon.json" /etc/docker/daemon.json || {
+        echo 'Existing Docker daemon configuration differs; reconcile it before bootstrap' >&2
+        exit 1
+    }
+else
+    install -m 644 "$source_dir/docker/daemon.json" /etc/docker/daemon.json
+fi
+systemctl enable docker
+systemctl restart docker
 if [[ ! -e /swapfile ]]; then
     install -m 600 /dev/null /swapfile
     fallocate -l 2G /swapfile
