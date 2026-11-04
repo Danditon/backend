@@ -44,9 +44,7 @@
 | `409 ALREADY_PASSED` | 이미 성공한 퀘스트 재수행 금지 (FAILED 후 재시도 허용) |
 | `502 AI_ERROR` | LLM·임베딩 호출 실패: 등록 전체 롤백 (저장한 사진 파일 삭제 포함), 수행 미저장. FAILED로 기록하지 않고 재시도 안내 |
 
-### 내부 임베딩 API (외부 비공개)
 
-BE에서만 호출하며 위 공개 API 목록에 포함되지 않습니다. `POST {EMBED_HOST}/embed`는 `multipart/form-data`의 `image` 파트로 사진 1장을 전달하고, `GET {EMBED_HOST}/health`는 모델 준비 상태를 확인합니다. 모델은 CLIP ViT-B-32, 벡터는 512차원·L2 정규화이며 BE가 내적으로 코사인 유사도를 계산합니다. 타임아웃은 5초, 실패 시 1회 재시도하고 최종 실패는 `502 AI_ERROR`로 반환합니다. 임베딩 서버의 `400`·`500`·`503 MODEL_LOADING`도 `502 AI_ERROR`로 변환합니다.
 
 ## 기술 스택
 
