@@ -1,0 +1,44 @@
+name: danditon
+services:
+  app:
+    image: ${APP_IMAGE:?release image.env is required}
+    restart: unless-stopped
+    mem_limit: 768m
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      PROD_DB_URL: ${PROD_DB_URL:?required}
+      PROD_DB_USERNAME: ${PROD_DB_USERNAME:?required}
+      PROD_DB_PASSWORD: ${PROD_DB_PASSWORD:?required}
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=60
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [backend, outbound]
+  db:
+    image: mysql:8.4@sha256:a81d043930e51745522bd5c430961cf8286f0a23f0a9a2a6e0108f7ea71b0902
+    restart: unless-stopped
+    mem_limit: 768m
+    command: ["--innodb-buffer-pool-size=256M", "--max-connections=50"]
+    environment:
+      MYSQL_DATABASE: danditon
+      MYSQL_USER: ${PROD_DB_USERNAME:?required}
+      MYSQL_PASSWORD: ${PROD_DB_PASSWORD:?required}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?required}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_PASSWORD\" mysql --protocol=TCP -h 127.0.0.1 -u\"$$MYSQL_USER\" -D danditon -Nse 'SELECT 1' >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 30s
+networks:
+  backend:
+    internal: true
+  outbound: {}
+volumes:
+  mysql-data:
+    name: danditon-mysql-data

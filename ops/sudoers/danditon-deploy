@@ -1,0 +1,2 @@
+# Docker administration is root-equivalent, including arbitrary host mounts.
+danditon-deploy ALL=(root) NOPASSWD: /usr/bin/docker
