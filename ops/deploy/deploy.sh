@@ -82,7 +82,7 @@ recover() {
         fi
         if [[ -n $prior ]]; then
             if compose "$prior" up -d --no-deps app && ready "$prior" &&
-                cp "$root/rollback.json" "$root/current.json.tmp" &&
+                cp --preserve=ownership,mode "$root/rollback.json" "$root/current.json.tmp" &&
                 mv -f "$root/current.json.tmp" "$root/current.json" &&
                 cmp -s "$root/rollback.json" "$root/current.json" &&
                 validate_record "$root/current.json" &&

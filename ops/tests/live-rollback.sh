@@ -43,7 +43,7 @@ services:
     entrypoint: ["/bin/sh", "-c", "exit 42"]
     restart: "no"
 EOF
-cp "$root/current.json" "$root/rollback.json"
+cp --preserve=ownership,mode "$root/current.json" "$root/rollback.json"
 transaction_record=$(jq --arg override "$work/unhealthy.yaml" '. + {operator_qa:"unhealthy-app",qa_override:$override}' "$root/current.json")
 printf '%s\n' "$transaction_record" > "$root/transaction.json"
 

@@ -315,3 +315,39 @@ if operator_qa > "$work/qa-result" 2>&1; then exit 1; fi
 grep -Fxq LOCK_TIMEOUT "$work/qa-result"
 flock -u 8
 printf 'PASS: operator adapter refuses unknown transaction, stale current SHA and busy deployment lock\n'
+
+if [[ ${1:-} == --operator-ownership ]]; then
+    [[ $EUID == 0 ]] || { printf 'FAIL: --operator-ownership requires root\n' >&2; exit 1; }
+    setup operator_ownership
+    deploy_uid=$(id -u nobody)
+    deploy_gid=$(id -g nobody)
+    chown -R "$deploy_uid:$deploy_gid" "$work"
+    setpriv --reuid="$deploy_uid" --regid="$deploy_gid" --clear-groups \
+        bash "$root/releases/$a/deploy.sh" "$a"
+    expected_owner=$(stat -c '%u:%g:%a' "$root/current.json")
+    set +e
+    operator_qa > "$work/qa-result" 2>&1
+    code=$?
+    set -e
+    cat "$work/qa-result"
+    [[ $code == 42 ]]
+    grep -q LIVE_ROLLBACK_VERIFIED "$work/qa-result"
+    ownership_failed=false
+    for record in current rollback; do
+        actual_owner=$(stat -c '%u:%g:%a' "$root/$record.json")
+        if [[ $actual_owner != "$expected_owner" ]]; then
+            printf 'FAIL: operator rollback changed %s.json owner/mode: expected=%s actual=%s\n' \
+                "$record" "$expected_owner" "$actual_owner" >&2
+            ownership_failed=true
+        fi
+    done
+    if ! setpriv --reuid="$deploy_uid" --regid="$deploy_gid" --clear-groups \
+        bash "$root/releases/$a/deploy.sh" "$a" > "$work/retry-result" 2>&1; then
+        cat "$work/retry-result" >&2
+        printf 'FAIL: deployment user cannot retry after root operator rollback\n' >&2
+        ownership_failed=true
+    fi
+    [[ $ownership_failed == false ]]
+    grep -Fxq ALREADY_CURRENT "$work/retry-result"
+    printf 'PASS: root operator rollback preserves metadata owner/mode and deployment-user retry\n'
+fi
