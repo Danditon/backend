@@ -4,20 +4,49 @@
 
 2026 단디톤(멋쟁이사자처럼 14기 대구·경북 연합 해커톤) 출품작의 백엔드 API입니다.
 
-## API (설계서 v0.1 기준)
+## API (설계 계약 v0.3)
 
-| 기능 | API | 담당 |
-|---|---|---|
-| 회원·로그인 | `POST /auth/signup`, `POST /auth/login`, `GET /users/me` | 박성준 |
-| AI 미리보기 | `POST /quests/preview` | 김영재 (AI 연동: 강영한) |
-| 그리움(퀘스트) 등록 | `POST /quests` | 김영재 |
-| 퀘스트 조회 | `GET /quests?lat=&lng=&radius=`, `GET /quests/{id}` | 김영재 |
-| 수행 + AI 검증 | `POST /quests/{id}/submissions` | 김영재 (AI 연동: 강영한) |
-| 안부 전달 | `GET /users/me/quests` | 김영재 |
-| 퀘스트 기록 | `GET /users/me/submissions` | 김영재 |
-| 감사 메시지 | `POST /submissions/{id}/thanks` | 박성준 |
+아래는 API 명세 v0.3의 설계 계약이며, 현재 구현 완료나 호출 가능 여부를 뜻하지 않습니다. 공개 API의 Base URL은 `/api`이고, 표의 경로는 이 기준의 상대 경로입니다.
 
-이미지 업로드와 저장소는 박성준, 배포는 김영재가 맡습니다.
+| 기능 | API |
+|---|---|
+| 회원가입 | `POST /auth/signup` |
+| 로그인 | `POST /auth/login` |
+| 내 정보 | `GET /users/me` |
+| AI 정형화·난이도 미리보기 (저장하지 않음) | `POST /quests/preview` |
+| 그리움(퀘스트) 등록 | `POST /quests` |
+| 주변 퀘스트 목록 | `GET /quests` |
+| 퀘스트 상세 | `GET /quests/{questId}` |
+| 수행 + AI 검증 | `POST /quests/{questId}/submissions` |
+| 수행 글 목록 (권한별) | `GET /quests/{questId}/submissions` |
+| 좋아요 토글 (퀘스트 등록자만) | `PATCH /submissions/{submissionId}/like` |
+| 내가 등록한 퀘스트 | `GET /users/me/quests` |
+| 내 수행 기록 (PASSED만) | `GET /users/me/submissions` |
+
+### 공통 계약
+
+- 회원가입·로그인을 제외한 모든 공개 API는 JWT `Authorization: Bearer {accessToken}`이 필요합니다. Access Token 만료는 24시간이며 Refresh Token은 없으므로 만료 시 재로그인합니다.
+- 응답에 공통 래퍼는 없고 성공은 데이터만, 에러는 `{code, message}`를 반환합니다. JSON 필드는 camelCase, 시간은 ISO-8601이며 MVP에서 페이징은 적용하지 않습니다.
+- 등록·수행은 `multipart/form-data`의 `request`(JSON)와 `photo`(파일) 파트를 사용합니다. 사진은 최대 1장·10MB·jpg/png/webp이며 HEIC는 FE에서 변환하거나 차단합니다. 사진은 서버 디스크에 저장하고 응답의 `photoUrl`은 전체 URL입니다.
+- `GENERAL`은 등록·수행 모두 글 필수·사진 선택이고, 수행 시 서버가 위치 200m 이내를 확인하면 성공합니다 (`similarity: null`). `IMAGE`는 등록·수행 모두 글·사진 필수이며, 위치 확인 후 기준 사진과 수행 사진의 임베딩 유사도로 검증합니다. 유사도 미달은 `201`과 `verifyStatus: "FAILED"`로 저장되며 재시도할 수 있습니다.
+- 주변 목록은 `lat`·`lng`가 필수이고 `radius`는 기본 50000m이며 `type`·`difficulty`로 필터링합니다. MVP 퀘스트는 `OPEN` 고정이고 목록은 내 퀘스트도 포함해 `isMine`으로 구분합니다.
+- 수행 글은 등록자(`AUTHOR`)와 PASSED 완료자(`COMPLETED`)에게 모든 수행자의 PASSED 글을, 그 외(`PERFORMER`)에게는 FAILED를 포함한 본인 결과만 반환합니다.
+
+| HTTP·code | 의미 |
+|---|---|
+| `400 INVALID_INPUT` | 종류별 필수값 누락, 사진 용량·확장자 위반 |
+| `401 UNAUTHORIZED` | 토큰 없음·만료 |
+| `403 OUT_OF_RANGE` | 서버 위치 재검증에서 200m 밖이면 수행을 저장하지 않음 |
+| `403 SELF_QUEST` | 본인이 등록한 퀘스트 수행 금지 |
+| `403 FORBIDDEN` | 퀘스트 등록자가 아닌 사용자의 좋아요 등 권한 위반 |
+| `404 NOT_FOUND` | 퀘스트·수행 없음 |
+| `409 DUPLICATE_EMAIL` | 이미 가입된 이메일 |
+| `409 ALREADY_PASSED` | 이미 성공한 퀘스트 재수행 금지 (FAILED 후 재시도 허용) |
+| `502 AI_ERROR` | LLM·임베딩 호출 실패: 등록 전체 롤백 (저장한 사진 파일 삭제 포함), 수행 미저장. FAILED로 기록하지 않고 재시도 안내 |
+
+### 내부 임베딩 API (외부 비공개)
+
+BE에서만 호출하며 위 공개 API 목록에 포함되지 않습니다. `POST {EMBED_HOST}/embed`는 `multipart/form-data`의 `image` 파트로 사진 1장을 전달하고, `GET {EMBED_HOST}/health`는 모델 준비 상태를 확인합니다. 모델은 CLIP ViT-B-32, 벡터는 512차원·L2 정규화이며 BE가 내적으로 코사인 유사도를 계산합니다. 타임아웃은 5초, 실패 시 1회 재시도하고 최종 실패는 `502 AI_ERROR`로 반환합니다. 임베딩 서버의 `400`·`500`·`503 MODEL_LOADING`도 `502 AI_ERROR`로 변환합니다.
 
 ## 기술 스택
 
