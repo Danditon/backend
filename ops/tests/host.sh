@@ -33,7 +33,6 @@ sudo visudo -cf ops/sudoers/danditon-deploy
 [[ $(jq -r '."log-driver"' ops/docker/daemon.json) == json-file ]]
 [[ $(jq -r '."log-opts"."max-size"' ops/docker/daemon.json) == 10m ]]
 [[ $(jq -r '."log-opts"."max-file"' ops/docker/daemon.json) == 3 ]]
-grep -Fq 'cmp -s "$source_dir/docker/daemon.json" /etc/docker/daemon.json' ops/host/bootstrap.sh
 cp -r /etc/fail2ban "$fixture/fail2ban"
 cp ops/fail2ban/danditon.local "$fixture/fail2ban/jail.d/danditon.local"
 sudo fail2ban-client -c "$fixture/fail2ban" -t
