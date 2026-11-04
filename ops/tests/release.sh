@@ -32,9 +32,12 @@ case "$1" in
         if [[ $4 == '{{.Id}}' ]]; then printf 'sha256:fixture\n'
         else printf 'ghcr.io/danditon/backend@%s\n' "$(cat "$FIXTURE/digest")"; fi ;;
     inspect)
-        if [[ $3 == '{{.Image}}' ]]; then printf 'sha256:fixture\n'
+        if [[ $3 == '{{json .Config.Entrypoint}}' ]]; then printf '["/bin/sh","-c","exit 42"]\n'
+        elif [[ $3 == '{{.State.Running}}' ]]; then printf 'false\n'
+        elif [[ $3 == '{{.State.ExitCode}}' ]]; then printf '42\n'
+        elif [[ $3 == '{{.Image}}' ]]; then printf 'sha256:fixture\n'
         else printf 'healthy\n'; fi ;;
-    volume) [[ -f $FIXTURE/db ]] ;;
+    volume) [[ -f $FIXTURE/db ]] && printf 'danditon-mysql-data:/fixture/db\n' ;;
     ps) [[ ! -f $FIXTURE/db ]] || printf 'db\n' ;;
     compose)
         directory=$(dirname "$9")
@@ -42,6 +45,12 @@ case "$1" in
         case "$*" in
             'ps -q db') [[ ! -f $FIXTURE/db ]] || printf 'db\n' ;;
             'ps -q app') [[ ! -f $FIXTURE/running ]] || printf 'app\n' ;;
+            'ps -aq app') printf 'qa-app\n' ;;
+            --file*'up -d --no-deps app')
+                [[ -f $(dirname "$(dirname "$directory")")/transaction.json ]] || exit 98
+                printf 'qa\n' > "$FIXTURE/running"
+                printf 'qa\n' > "$FIXTURE/bad"
+                [[ ! -f $FIXTURE/qa-recovery-failure ]] || touch "$FIXTURE/allbad" ;;
             'up -d --wait --wait-timeout 120 db') touch "$FIXTURE/db" ;;
             'up -d --no-deps app')
                 basename "$directory" > "$FIXTURE/running"
@@ -85,7 +94,7 @@ setup() {
     root="$work/case-$case_name"
     mkdir -p "$root/releases"
     /bin/rm -f "$work/db" "$work/running" "$work/bad" "$work/allbad" "$work/interrupt" \
-        "$work/post-promotion" "$work/post-cleanup" "$work/fail-restore" "$work/fail-remove" "$work/fail-cleanup"
+        "$work/post-promotion" "$work/post-cleanup" "$work/fail-restore" "$work/fail-remove" "$work/fail-cleanup" "$work/qa-recovery-failure"
     : > "$work/docker.log"
     for sha in "$a" "$b"; do
         mkdir "$root/releases/$sha"
@@ -209,3 +218,46 @@ fails first-deploy-failure deploy "$a"
 [[ ! -e $work/running && -e $root/current.json && -e $root/transaction.json ]]
 fails reconciliation-required deploy "$a"
 printf 'PASS: all release fixtures; cleanup on EXIT\n'
+
+operator_qa() {
+    # Only the fixture bypasses root and rewrites /opt; production has no override.
+    sed "s|root=/opt/danditon|root=$root|; /\[\[ \$EUID == 0 \]\]/d; s/flock -w 60/flock -w 1/" \
+        ops/tests/live-rollback.sh > "$work/operator-qa.sh"
+    bash "$work/operator-qa.sh" --current "$a" --case unhealthy-app
+}
+setup operator_recovery
+deploy "$a"
+set +e
+operator_qa > "$work/qa-result" 2>&1
+code=$?
+set -e
+[[ $code == 42 ]]
+grep -Fxq EXPECTED_UNHEALTHY_CANDIDATE "$work/qa-result"
+grep -Fxq ROLLED_BACK "$work/qa-result"
+grep -q LIVE_ROLLBACK_VERIFIED "$work/qa-result"
+[[ $(cat "$work/running") == "$a" && ! -e $root/transaction.json ]]
+[[ -z $(find "$root" -maxdepth 1 -name '.rollback-qa.*' -print) ]]
+printf 'PASS: operator adapter activates candidate, shared recovery restores app, exits42, removes QA artifacts\n'
+setup operator_recovery_failure
+deploy "$a"
+touch "$work/qa-recovery-failure"
+if operator_qa > "$work/qa-result" 2>&1; then exit 1; fi
+grep -q LIVE_ROLLBACK_FAILED "$work/qa-result"
+[[ -s $root/transaction.json ]]
+[[ -f $(jq -r .qa_override "$root/transaction.json") ]]
+printf 'PASS: operator recovery failure preserves transaction and override for reconciliation\n'
+if operator_qa > "$work/qa-result" 2>&1; then exit 1; fi
+grep -Fxq OPERATOR_RECONCILIATION_REQUIRED "$work/qa-result"
+setup operator_stale
+deploy "$a"
+printf '%s\n' "$b" > "$work/head"
+deploy "$b"
+if operator_qa > "$work/qa-result" 2>&1; then exit 1; fi
+grep -Fxq CURRENT_SHA_MISMATCH "$work/qa-result"
+[[ $(cat "$work/running") == "$b" && ! -e $root/transaction.json ]]
+exec 8>"$root/deploy.lock"
+flock 8
+if operator_qa > "$work/qa-result" 2>&1; then exit 1; fi
+grep -Fxq LOCK_TIMEOUT "$work/qa-result"
+flock -u 8
+printf 'PASS: operator adapter refuses unknown transaction, stale current SHA and busy deployment lock\n'

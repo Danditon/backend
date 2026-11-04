@@ -183,6 +183,25 @@ curl -i --max-time 10 http://127.0.0.1:8080/actuator/health/readiness
 
 정상 운영 중 수동 되돌리기는 새 revert PR → 팀원 승인 → 최신 develop 배포를 우선한다. 오래된 SHA를 deploy.sh에 넣으면 freshness gate가 거부한다. 긴급 수동 복구도 위 lock/기록/검증 절차를 따라야 한다.
 
+초기 암호화 백업과 격리 복구가 성공한 뒤에는 운영자만 실제 앱 롤백 시험을 한 번 수행한다. 어댑터는 현재 release에서 checksum을 검증한 운영 `deploy.sh`를 source하여 동일한 `compose`/`ready`/`recover` 경로를 사용한다. 현재 digest의 앱 컨테이너만 즉시 종료되는 entrypoint로 교체하고 DB 컨테이너·volume은 건드리지 않는다. 정상 복구되어도 의도한 실패 시험이므로 종료 코드는 42다.
+
+```bash
+CURRENT_SHA=$(sudo jq -er '.sha' /opt/danditon/current.json)
+set +e
+sudo bash ops/tests/live-rollback.sh --current "$CURRENT_SHA" --case unhealthy-app 2>&1 | tee /tmp/danditon-live-rollback.log
+ROLLBACK_QA_STATUS=${PIPESTATUS[0]}
+set -e
+[[ $ROLLBACK_QA_STATUS == 42 ]]
+grep -Fxq EXPECTED_UNHEALTHY_CANDIDATE /tmp/danditon-live-rollback.log
+grep -Fxq ROLLED_BACK /tmp/danditon-live-rollback.log
+grep -Fq LIVE_ROLLBACK_VERIFIED /tmp/danditon-live-rollback.log
+curl -fsS http://127.0.0.1:8080/actuator/health/readiness | jq -e '.status == "UP"'
+curl -fsS http://43.201.189.37/health | jq -e '.status == "UP"'
+rm -- /tmp/danditon-live-rollback.log
+```
+
+배포·백업·다른 장애 시험과 겹치지 않는다. `LIVE_ROLLBACK_FAILED OPERATOR_RECONCILIATION_REQUIRED`가 나오거나 연결이 끊기면 재시도하거나 marker/QA override를 지우지 말고 위 중단 복구 절차로 실제 앱/DB/기록을 대조한다. 실패 시 어댑터는 조사에 필요한 transaction과 QA 파일을 보존한다. 이 어댑터는 `ops/tests`에만 있고 정상 `deploy.sh`에는 시험 인자가 없다.
+
 ## 키 교체·폐기와 SSH 분실
 
 운영 키와 배포 키는 공유하지 않는다. 예정된 교체 때 새 공개키를 기존 키와 잠시 함께 `authorized_keys`에 설치하고 소유자/700 디렉터리/600 파일 권한을 유지한다. `danditon-deploy`의 새 줄에는 기존 `restrict` 옵션을 유지한다. 새 키로 별도 세션 인증을 확인한 다음 GitHub `EC2_SSH_PRIVATE_KEY`를 교체하고 최신 develop 배포를 확인한다. 그 뒤 옛 공개키 줄과 옛 private key 사본을 폐기한다. operator는 새 operator 세션이 sudo와 터널까지 동작하는 것을 확인한 후 옛 키를 제거한다. bootstrap 재실행은 배포 authorized_keys를 제공된 한 키로 교체하므로 이중 키 교체 중에는 사용하지 않는다.
