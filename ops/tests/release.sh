@@ -24,21 +24,52 @@ EOF
 cat > "$work/bin/sudo" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+image_id() {
+    local first=${1:0:1} i
+    printf 'sha256:'
+    for ((i=0; i<64; i++)); do printf '%s' "$first"; done
+    printf '\n'
+}
 shift 2
 printf '%s\n' "$*" >> "$FIXTURE/docker.log"
 case "$1" in
-    pull) exit 0 ;;
+    pull)
+        tag=${2##*:}
+        if ! grep -Eq "^ghcr.io/danditon/backend ${tag} " "$FIXTURE/images"; then
+            printf 'ghcr.io/danditon/backend %s %s\n' "$tag" "$(image_id "$tag")" >> "$FIXTURE/images"
+        fi ;;
     image)
-        if [[ $4 == '{{.Id}}' ]]; then printf 'sha256:fixture\n'
-        else printf 'ghcr.io/danditon/backend@%s\n' "$(cat "$FIXTURE/digest")"; fi ;;
+        case "$2" in
+            inspect)
+                if [[ $4 == '{{.Id}}' ]]; then
+                    reference=$5
+                    tag=${reference#ghcr.io/danditon/backend:}
+                    tag=${tag%@*}
+                    image_id "$tag"
+                else
+                    printf 'ghcr.io/danditon/backend@%s\n' "$(cat "$FIXTURE/digest")"
+                fi ;;
+            ls) cat "$FIXTURE/images" ;;
+            rm)
+                [[ ! -f $FIXTURE/fail-image-cleanup ]] || exit 44
+                reference=$3
+                printf '%s\n' "$reference" >> "$FIXTURE/removed"
+                awk -v reference="$reference" '$1 ":" $2 != reference' "$FIXTURE/images" > "$FIXTURE/images.tmp"
+                /bin/mv "$FIXTURE/images.tmp" "$FIXTURE/images" ;;
+            *) exit 9 ;;
+        esac ;;
     inspect)
         if [[ $3 == '{{json .Config.Entrypoint}}' ]]; then printf '["/bin/sh","-c","exit 42"]\n'
         elif [[ $3 == '{{.State.Running}}' ]]; then printf 'false\n'
         elif [[ $3 == '{{.State.ExitCode}}' ]]; then printf '42\n'
-        elif [[ $3 == '{{.Image}}' ]]; then printf 'sha256:fixture\n'
+        elif [[ $3 == '{{.Image}}' ]]; then
+            if [[ $4 == app ]]; then image_id "$(cat "$FIXTURE/running")"
+            else image_id f; fi
         else printf 'healthy\n'; fi ;;
     volume) [[ -f $FIXTURE/db ]] && printf 'danditon-mysql-data:/fixture/db\n' ;;
-    ps) [[ ! -f $FIXTURE/db ]] || printf 'db\n' ;;
+    ps)
+        [[ ! -f $FIXTURE/db ]] || printf 'db\n'
+        [[ ! -f $FIXTURE/running ]] || printf 'app\n' ;;
     compose)
         directory=$(dirname "$9")
         shift 9
@@ -87,6 +118,7 @@ EOF
 chmod +x "$work/bin/"*
 a=$(printf 'a%.0s' {1..40})
 b=$(printf 'b%.0s' {1..40})
+c=$(printf 'c%.0s' {1..40})
 digest="sha256:$(printf 'd%.0s' {1..64})"
 printf '%s\n' "$digest" > "$work/digest"
 setup() {
@@ -95,7 +127,11 @@ setup() {
     mkdir -p "$root/releases"
     /bin/rm -f "$work/db" "$work/running" "$work/bad" "$work/allbad" "$work/interrupt" \
         "$work/post-promotion" "$work/post-cleanup" "$work/fail-restore" "$work/fail-remove" "$work/fail-cleanup" "$work/qa-recovery-failure"
+    /bin/rm -f "$work/fail-image-cleanup"
     : > "$work/docker.log"
+    : > "$work/removed"
+    printf 'ghcr.io/danditon/backend %s sha256:%s\n' "$c" "$(printf 'c%.0s' {1..64})" > "$work/images"
+    printf 'ghcr.io/danditon/backend latest sha256:%s\n' "$(printf 'e%.0s' {1..64})" >> "$work/images"
     for sha in "$a" "$b"; do
         mkdir "$root/releases/$sha"
         sed "s|root=/opt/danditon|root=$root|; s/flock -w 60/flock -w 1/" "$source_script" > "$root/releases/$sha/deploy.sh"
@@ -135,8 +171,20 @@ deploy "$b"
 [[ $(jq -r .sha "$root/current.json") == "$b" ]]
 [[ $(jq -r .sha "$root/previous.json") == "$a" ]]
 [[ $(grep -c 'up -d --wait' "$work/docker.log") == 1 ]]
+grep -Fxq "ghcr.io/danditon/backend:$c" "$work/removed"
+if grep -Fxq "ghcr.io/danditon/backend:$a" "$work/removed"; then exit 1; fi
+if grep -Fxq "ghcr.io/danditon/backend:$b" "$work/removed"; then exit 1; fi
+grep -Eq '^ghcr.io/danditon/backend latest ' "$work/images"
 deploy "$b" | grep -q ALREADY_CURRENT
-printf 'PASS: A->B, metadata, database untouched, idempotent retry\n'
+printf 'PASS: A->B, metadata, database untouched, retained current/previous, removed old SHA image, ignored non-SHA tag, idempotent retry\n'
+setup cleanup_warning
+touch "$work/fail-image-cleanup"
+deploy "$a" > "$work/result" 2>&1
+grep -Fxq 'IMAGE_CLEANUP_WARNING deployment_succeeded=true' "$work/result"
+grep -Fxq "DEPLOYED $a" "$work/result"
+[[ $(jq -r .sha "$root/current.json") == "$a" ]]
+grep -Eq "^ghcr.io/danditon/backend ${c} " "$work/images"
+printf 'PASS: cleanup failure warns without rolling back healthy deployment\n'
 fails invalid-sha bash "$root/releases/$a/deploy.sh" 'a;touch /tmp/injected'
 fails extra-argument bash "$root/releases/$a/deploy.sh" "$a" surprise
 printf 'changed\n' >> "$root/releases/$b/compose.prod.yaml"
@@ -161,9 +209,12 @@ setup rollback
 deploy "$a"
 printf '%s\n' "$b" > "$work/head"
 printf '%s\n' "$b" > "$work/bad"
+: > "$work/removed"
 fails unhealthy-rollback deploy "$b"
 [[ $(cat "$work/running") == "$a" && ! -e $root/transaction.json ]]
 [[ $(jq -r .sha "$root/current.json") == "$a" ]]
+[[ ! -s $work/removed ]]
+grep -Eq "^ghcr.io/danditon/backend ${b} " "$work/images"
 setup first
 printf '%s\n' "$a" > "$work/bad"
 fails first-deploy-failure deploy "$a"
@@ -179,8 +230,11 @@ setup rollback_failure
 deploy "$a"
 printf '%s\n' "$b" > "$work/head"
 touch "$work/allbad"
+: > "$work/removed"
 fails rollback-failure deploy "$b"
 [[ -e $root/transaction.json ]]
+[[ ! -s $work/removed ]]
+grep -Eq "^ghcr.io/danditon/backend ${b} " "$work/images"
 setup post_promotion
 deploy "$a"
 printf '%s\n' "$b" > "$work/head"

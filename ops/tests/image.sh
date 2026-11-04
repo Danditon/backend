@@ -12,6 +12,12 @@ jq -e --arg revision "$revision" '
     .Config.Labels["org.opencontainers.image.source"] == "https://github.com/Danditon/Backend"
 ' "$work/inspect.json" >/dev/null
 docker run --rm --entrypoint java "$image" -version 2>&1 | grep -E 'version "17\.'
+docker run --rm --entrypoint sh "$image" -c '
+    test "$(id -u):$(id -g)" = "10001:10001"
+    test "$(stat -c %u:%g /app/uploads)" = "10001:10001"
+    touch /app/uploads/.image-write-probe
+    rm /app/uploads/.image-write-probe
+'
 docker image save -o "$work/image.tar" "$image"
 tar -xOf "$work/image.tar" manifest.json | jq -r '.[0].Layers[]' > "$work/layers"
 while IFS= read -r layer; do
@@ -23,5 +29,5 @@ if grep -E '(^|/)(\.env([^/]*|)|\.git|\.codex|\.omo|id_rsa|id_ed25519)(/|$)' "$w
     exit 1
 fi
 grep -Fxq app/app.jar "$work/paths"
-printf 'PASS: amd64 Java17 non-root revision/source labels; all %s layers lack secret/workspace paths\n' "$(wc -l < "$work/layers")"
+printf 'PASS: amd64 Java17 non-root writable uploads revision/source labels; all %s layers lack secret/workspace paths\n' "$(wc -l < "$work/layers")"
 docker image inspect "$image" --format '{{.Id}} {{.Architecture}} {{.Config.User}} {{index .Config.Labels "org.opencontainers.image.revision"}}'

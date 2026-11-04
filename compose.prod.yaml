@@ -12,6 +12,8 @@ services:
       JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=60
     ports:
       - "127.0.0.1:8080:8080"
+    volumes:
+      - uploads-data:/app/uploads
     depends_on:
       db:
         condition: service_healthy
@@ -42,3 +44,5 @@ networks:
 volumes:
   mysql-data:
     name: danditon-mysql-data
+  uploads-data:
+    name: danditon-uploads-data

@@ -3,19 +3,19 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 fixture=$(mktemp -d /tmp/danditon-compose-qa.XXXXXXXX)
 project=danditon-compose-qa-$(basename "$fixture" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9')
+db_volume=$project-db-data
+uploads_volume=$project-uploads-data
 cleanup() {
-    local status=$? cleanup_status=0 volumes
+    local status=$? cleanup_status=0 volume
     trap - EXIT
     if [[ -f $fixture/env && -f $fixture/override.yaml ]]; then
         docker compose -p "$project" --env-file "$fixture/env" -f compose.prod.yaml -f "$fixture/override.yaml" down >/dev/null || cleanup_status=1
     fi
-    if volumes=$(docker volume ls -q --filter "name=^${project}-data$"); then
-        if [[ $volumes == "$project-data" ]]; then
-            docker volume rm "$project-data" >/dev/null || cleanup_status=1
+    for volume in "$db_volume" "$uploads_volume"; do
+        if docker volume inspect "$volume" >/dev/null 2>&1; then
+            docker volume rm "$volume" >/dev/null || cleanup_status=1
         fi
-    else
-        cleanup_status=1
-    fi
+    done
     rm -rf -- "$fixture" || cleanup_status=1
     if [[ -e $fixture ]]; then cleanup_status=1; fi
     if (( cleanup_status == 0 )); then echo CLEANUP_COMPOSE_FIXTURE; else echo CLEANUP_FAILED >&2; fi
@@ -40,7 +40,9 @@ services:
     ports: !override ["127.0.0.1::8080"]
 volumes:
   mysql-data:
-    name: $project-data
+    name: $db_volume
+  uploads-data:
+    name: $uploads_volume
 EOF
 compose=(docker compose -p "$project" --env-file "$fixture/env" -f compose.prod.yaml -f "$fixture/override.yaml")
 docker compose --env-file "$fixture/env" -f compose.prod.yaml config --quiet
@@ -65,10 +67,19 @@ ready
 [[ $(docker inspect -f '{{len .HostConfig.PortBindings}}' "$db") == 0 ]]
 [[ $(docker network inspect -f '{{.Internal}}' "${project}_backend") == true ]]
 docker exec "$app" sh -c 'test -z "${MYSQL_ROOT_PASSWORD:-}"'
+[[ $(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/app/uploads"}}{{.Name}}{{end}}{{end}}' "$app") == "$uploads_volume" ]]
+docker exec "$app" sh -c '
+    test "$(id -u):$(id -g)" = "10001:10001"
+    test "$(stat -c %u:%g /app/uploads)" = "10001:10001"
+    printf persistent-photo > /app/uploads/.compose-persistence-probe
+'
 sql() { docker exec "$db" sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" mysql -u"$MYSQL_USER" danditon -Nse "$1"' sh "$1"; }
 sql 'CREATE TABLE persistence_probe (id INT PRIMARY KEY); INSERT INTO persistence_probe VALUES(7)'
 "${compose[@]}" up -d --no-deps --force-recreate app
+app=$("${compose[@]}" ps -q app)
 ready
+docker exec "$app" grep -Fxq persistent-photo /app/uploads/.compose-persistence-probe
+echo UPLOADS_UID_10001_WRITE_AND_RECREATE_PERSISTENCE_PASS
 [[ $(sql 'SELECT id FROM persistence_probe') == 7 ]]
 ready
 "${compose[@]}" stop db

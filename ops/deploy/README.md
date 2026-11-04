@@ -26,6 +26,13 @@ The exclusive lock waits up to 60 seconds; network Git lookup is limited to 30
 seconds, each Docker operation to 180 seconds, DB initialization to 120 seconds,
 and readiness to 30 attempts with 2-second pauses and 3-second HTTP requests.
 
+After a successful promotion, while still holding the deployment lock, the deploy
+script removes obsolete `ghcr.io/danditon/backend:<full-sha>` image references only.
+Images recorded by `current.json`, `previous.json` or `transaction.json`, and images
+used by any existing container, are retained. It never runs broad image or system
+prune commands. Cleanup failure emits `IMAGE_CLEANUP_WARNING` but does not roll back
+or misreport the already healthy deployment.
+
 Failure after app activation restores the prior app/config and current metadata
 from `rollback.json`, and checks readiness and metadata consistency before clearing
 the transaction marker. Recovery also covers signals after metadata promotion.

@@ -39,6 +39,38 @@ validate_record() {
     (cd "$directory" && sha256sum --check --strict --status SHA256SUMS) || return 1
     [[ $(cat "$directory/image.env") == "APP_IMAGE=$(jq -r '.image' "$record")" ]]
 }
+cleanup_old_app_images() {
+    local record reference image_id containers listing repository tag removed=0
+    local -A keep=()
+    for record in "$root/current.json" "$root/previous.json" "$root/transaction.json"; do
+        [[ -e $record ]] || continue
+        [[ -f $record && ! -L $record ]] || return 1
+        reference=$(jq -er '.image | select(test("^ghcr\\.io/danditon/backend:[0-9a-f]{40}@sha256:[0-9a-f]{64}$"))' "$record") || return 1
+        image_id=$(docker_cmd image inspect --format '{{.Id}}' "$reference") || return 1
+        [[ $image_id =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+        keep["$image_id"]=1
+    done
+    containers=$(docker_cmd ps -aq) || return 1
+    if [[ -n $containers ]]; then
+        while IFS= read -r container; do
+            [[ -n $container ]] || continue
+            image_id=$(docker_cmd inspect --format '{{.Image}}' "$container") || return 1
+            [[ $image_id =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+            keep["$image_id"]=1
+        done <<< "$containers"
+    fi
+    listing=$(docker_cmd image ls --no-trunc --format '{{.Repository}} {{.Tag}} {{.ID}}' ghcr.io/danditon/backend) || return 1
+    while read -r repository tag image_id; do
+        [[ -n ${repository:-} ]] || continue
+        [[ $repository == ghcr.io/danditon/backend && $tag =~ ^[0-9a-f]{40}$ && $image_id =~ ^sha256:[0-9a-f]{64}$ ]] || continue
+        [[ -z ${keep[$image_id]+x} ]] || continue
+        reference="$repository:$tag"
+        docker_cmd image rm "$reference" || return 1
+        printf 'IMAGE_CLEANUP_REMOVED %s %s\n' "$reference" "$image_id"
+        ((removed += 1))
+    done <<< "$listing"
+    printf 'IMAGE_CLEANUP_COMPLETE removed=%d\n' "$removed"
+}
 recover() {
     local code=$?
     trap - EXIT
@@ -152,6 +184,9 @@ deploy_main() {
     mv -f "$root/candidate.json" "$root/current.json"
     rm -f -- "$root/transaction.json"
     trap - EXIT HUP INT TERM
+    if ! cleanup_old_app_images; then
+        printf 'IMAGE_CLEANUP_WARNING deployment_succeeded=true\n' >&2
+    fi
     printf 'DEPLOYED %s\n' "$sha"
 }
 

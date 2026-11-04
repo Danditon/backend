@@ -128,7 +128,7 @@ sudo nginx -t
 
 [release 계약](../ops/deploy/README.md)의 `/opt/danditon/releases/<sha>`에는 `deploy.sh`, `compose.prod.yaml`, `image-digest.txt`, `SHA256SUMS`가 있고 실행 시 `image.env`가 추가된다. native SCP로 SHA별 incoming 디렉터리에 완전히 옮긴 후 원자적으로 확정한다. 기존 SHA의 바이트/digest가 다르면 거부한다. 실행 형태는 `bash /opt/danditon/releases/$SHA/deploy.sh $SHA` 한 개의 검증된 전체 SHA 인자다.
 
-Actions concurrency `danditon-production`은 `cancel-in-progress: false`, 호스트는 `flock`으로 직렬화하고 최신 develop을 재확인한다. 일반 배포는 DB healthy를 확인하고 `up -d --no-deps app`만 실행한다. `current.json`/`previous.json`은 SHA, digest-qualified image, manifest, release directory, env 경로를 보존한다. Compose project는 항상 `danditon`, volume은 `danditon-mysql-data`다.
+Actions concurrency `danditon-production`은 `cancel-in-progress: false`, 호스트는 `flock`으로 직렬화하고 최신 develop을 재확인한다. 일반 배포는 DB healthy를 확인하고 `up -d --no-deps app`만 실행한다. `current.json`/`previous.json`은 SHA, digest-qualified image, manifest, release directory, env 경로를 보존한다. Compose project는 항상 `danditon`이다. MySQL은 `danditon-mysql-data`, 업로드 사진은 `danditon-uploads-data` named volume에 저장되어 앱 컨테이너 재생성에도 유지된다. `/app/uploads`는 이미지의 비루트 UID/GID `10001:10001`이 쓸 수 있어야 한다.
 
 외부에서는 아래 첫 명령, 나머지는 **호스트의 operator 셸**에서 실행한다. `.directory`가 메타데이터의 실제 키이며 `CURRENT_COMPOSE`를 추측하지 않는다.
 
@@ -147,7 +147,7 @@ sudo docker inspect --format '{{.Image}} {{.State.Status}}' "$APP_ID"
 sudo docker image inspect --format '{{.Id}} {{json .RepoDigests}}' "$(sudo jq -r .image /opt/danditon/current.json)"
 curl -i --max-time 10 http://127.0.0.1:8080/actuator/health/readiness
 sudo journalctl -u nginx -u ssh -u fail2ban --since '15 minutes ago' --no-pager -n 100
-sudo docker volume inspect --format '{{.Name}} {{.Driver}}' danditon-mysql-data
+sudo docker volume inspect --format '{{.Name}} {{.Driver}}' danditon-mysql-data danditon-uploads-data
 ```
 
 정상은 HTTP 200과 `{"status":"UP"}`, DB healthy, 앱 running, container Image ID와 기록된 이미지 Id 일치다. `/health`는 Nginx가 정확히 readiness로 매핑하고 다른 Actuator 경로는 외부에 제공하지 않는다. DB 단절 시 readiness 503이므로 앱 프로세스가 살아 있다는 사실만으로 정상 처리하지 않는다. `docker compose config` 렌더링, 전체 `docker inspect`, `env`/`printenv`, `.env` cat, `set -x`를 운영 로그 수집에 사용하지 않는다. 앱 로그에도 개인정보가 있을 수 있으므로 제한된 범위만 보고 외부 공유 전 가린다.
@@ -279,7 +279,7 @@ PASS는 pipeline exit 0, 기대한 schema table count, `RESTORE_VERIFIED_ISOLATE
 
 ## 디스크·비용·종료
 
-매일 호스트에서 `df -h / /var/lib/docker /var/backups/danditon`, `df -i /`, `sudo docker system df`, `sudo journalctl --disk-usage`, `free -m`, `swapon --show`를 확인한다. 20 GiB에는 image/DB/log/backup/swap이 함께 들어간다. 여유 공간이 부족하면 새 배포를 멈추고 어떤 경로가 늘었는지 확인한다. current/previous/transaction이 참조하는 이미지·release와 DB volume은 보존한다. 검증된 외부 사본이 있는 **개별 오래된 암호문**, 참조되지 않는 **개별 이미지 ID**만 목록을 검토한 뒤 지운다. broad prune으로 공간을 확보하지 않는다. 컨테이너 로그는 host Docker의 `json-file` 드라이버에서 파일당 10 MiB, 최대 3개로 제한한다. 기존 `/etc/docker/daemon.json`이 이 설정과 다르면 bootstrap은 덮어쓰지 않고 중단하므로 운영자가 병합·검증한 뒤 재실행한다. DB 증가가 원인이면 별도 용량 계획이 필요하다.
+매일 호스트에서 `df -h / /var/lib/docker /var/backups/danditon`, `df -i /`, `sudo docker system df`, `sudo journalctl --disk-usage`, `free -m`, `swapon --show`를 확인한다. 20 GiB에는 image/DB/log/backup/swap이 함께 들어간다. 여유 공간이 부족하면 새 배포를 멈추고 어떤 경로가 늘었는지 확인한다. 성공한 배포는 lock을 보유한 상태에서 `current.json`·`previous.json`·`transaction.json`이 참조하거나 기존 컨테이너가 사용하는 이미지 ID를 보존하고, 그 외 `ghcr.io/danditon/backend:<40자리 SHA>` 참조만 자동 삭제한다. 이 정리는 배포 시에만 실행되며 실패해도 정상 배포를 롤백하지 않고 `IMAGE_CLEANUP_WARNING`을 남긴다. 검증된 외부 사본이 있는 **개별 오래된 암호문**만 별도로 검토해 지운다. `docker image prune`이나 broad system prune으로 공간을 확보하지 않는다. 컨테이너 로그는 host Docker의 `json-file` 드라이버에서 파일당 10 MiB, 최대 3개로 제한한다. 기존 `/etc/docker/daemon.json`이 이 설정과 다르면 bootstrap은 덮어쓰지 않고 중단하므로 운영자가 병합·검증한 뒤 재실행한다. DB 증가가 원인이면 별도 용량 계획이 필요하다.
 
 2026-11-04 서울 조사 기준 730시간 월 모델은 t3.small `730 × $0.026 = $18.98`, gp3 20 GiB `20 × $0.0912 = $1.824`, EIP 1개 `730 × $0.005 = $3.65`, 합계 **약 $24.45/월**이다. 이는 고정 자원 기준이며 상한이 아니다. [EC2 요금](https://aws.amazon.com/ec2/pricing/on-demand/), [EBS 지역 요금](https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/ec2/USD/current/ebs.json), [IPv4 요금](https://aws.amazon.com/vpc/pricing/)을 생성/인계 때 재확인한다. 사용 중/미연결 EIP 모두 과금되고 stop으로 EBS/IP 비용이 없어지지 않는다.
 

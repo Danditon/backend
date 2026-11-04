@@ -25,6 +25,7 @@ project=$(sed -n 's/^FIXTURE_PROJECT=//p' "$log")
 [[ $project == danditon-compose-qa-* ]]
 [[ -z $(docker ps -aq --filter "label=com.docker.compose.project=$project") ]]
 [[ -z $(docker network ls -q --filter "label=com.docker.compose.project=$project") ]]
-[[ -z $(docker volume ls -q --filter "name=^${project}-data$") ]]
+[[ -z $(docker volume ls -q --filter "name=^${project}-db-data$") ]]
+[[ -z $(docker volume ls -q --filter "name=^${project}-uploads-data$") ]]
 cat "$log"
 echo "$result"
