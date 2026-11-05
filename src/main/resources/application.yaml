@@ -8,6 +8,10 @@ spring:
       max-file-size: ${MULTIPART_MAX_FILE_SIZE:10MB}
       max-request-size: ${MULTIPART_MAX_REQUEST_SIZE:12MB}
 
+security:
+  jwt:
+    secret-base64: ${JWT_SECRET_BASE64:}
+
 management:
   endpoints:
     web:

@@ -4,13 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.net.URI;
 import java.net.CookieManager;
-import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.Base64;
-import java.util.regex.Pattern;
 
 import com.zaxxer.hikari.HikariDataSource;
 import org.junit.jupiter.api.Test;
@@ -31,10 +28,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
-	"spring.security.user.name=readiness-test",
-	"spring.security.user.password=fixture-only"
-})
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles({"prod", "test"})
 @Import(ReadinessIntegrationTests.Fixtures.class)
 class ReadinessIntegrationTests {
@@ -90,32 +84,10 @@ class ReadinessIntegrationTests {
 			.method("HEAD", HttpRequest.BodyPublishers.noBody())).statusCode());
 		assertEquals(401, send(HttpRequest.newBuilder(uri("/actuator/health/readiness"))
 			.POST(HttpRequest.BodyPublishers.noBody())).statusCode());
-		String authorization = "Basic " + Base64.getEncoder()
-			.encodeToString("readiness-test:fixture-only".getBytes(java.nio.charset.StandardCharsets.UTF_8));
-		assertEquals(200, send(HttpRequest.newBuilder(uri("/test/protected"))
-			.header("Authorization", authorization).GET()).statusCode());
-		assertEquals(404, send(HttpRequest.newBuilder(uri("/actuator/env"))
-			.header("Authorization", authorization).GET()).statusCode());
-		String token = loginToken();
-		assertEquals(302, send(HttpRequest.newBuilder(uri("/login"))
-			.header("Content-Type", "application/x-www-form-urlencoded")
-			.POST(HttpRequest.BodyPublishers.ofString(
-				"username=readiness-test&password=fixture-only&_csrf=" + token))).statusCode());
-		assertEquals(200, send(HttpRequest.newBuilder(uri("/test/protected")).GET()).statusCode());
-		assertEquals(403, send(HttpRequest.newBuilder(uri("/test/protected"))
-			.POST(HttpRequest.BodyPublishers.noBody())).statusCode());
-		assertEquals(200, send(HttpRequest.newBuilder(uri("/test/protected"))
-			.header("Content-Type", "application/x-www-form-urlencoded")
-			.POST(HttpRequest.BodyPublishers.ofString("_csrf=" + loginToken()))).statusCode());
-	}
-
-	private String loginToken() throws Exception {
-		var response = client.send(HttpRequest.newBuilder(uri("/login"))
-			.timeout(Duration.ofSeconds(10)).GET().build(), HttpResponse.BodyHandlers.ofString());
-		assertEquals(200, response.statusCode());
-		var token = Pattern.compile("name=\"_csrf\"[^>]*value=\"([^\"]+)\"").matcher(response.body());
-		org.junit.jupiter.api.Assertions.assertTrue(token.find());
-		return URLEncoder.encode(token.group(1), java.nio.charset.StandardCharsets.UTF_8);
+		assertEquals(401, send(HttpRequest.newBuilder(uri("/actuator/health/readiness"))
+			.header("Authorization", "Bearer malformed").GET()).statusCode());
+		assertEquals(401, send(HttpRequest.newBuilder(uri("/actuator/health/readiness/"))
+			.GET()).statusCode());
 	}
 
 	@Test
