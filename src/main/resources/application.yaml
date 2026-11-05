@@ -12,6 +12,12 @@ security:
   jwt:
     secret-base64: ${JWT_SECRET_BASE64:}
 
+springdoc:
+  paths-to-match: /api/**
+  override-with-generic-response: false
+  swagger-ui:
+    disable-swagger-default-url: true
+
 management:
   endpoints:
     web:
