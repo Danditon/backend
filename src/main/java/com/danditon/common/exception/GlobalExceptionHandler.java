@@ -39,7 +39,7 @@ public class GlobalExceptionHandler {
 		MaxUploadSizeExceededException.class
 	})
 	public ResponseEntity<ErrorResponse> handleInvalidInput(Exception e) {
-		log.debug("잘못된 입력: {}", e.getMessage());
+		log.debug("잘못된 입력: {}", e.getClass().getSimpleName());
 		return ResponseEntity.status(ErrorCode.INVALID_INPUT.getStatus())
 			.body(ErrorResponse.of(ErrorCode.INVALID_INPUT));
 	}
@@ -56,7 +56,7 @@ public class GlobalExceptionHandler {
 		if (e instanceof org.springframework.web.ErrorResponse springError) {
 			HttpStatusCode status = springError.getStatusCode();
 			if (status.is4xxClientError()) {
-				log.debug("Spring 표준 예외: {}", e.getMessage());
+				log.debug("Spring 표준 예외: {}", e.getClass().getSimpleName());
 				return ResponseEntity.status(status)
 					.body(ErrorResponse.of(ErrorCode.INVALID_INPUT));
 			}
