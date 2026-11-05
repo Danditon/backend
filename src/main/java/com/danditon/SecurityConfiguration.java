@@ -36,6 +36,8 @@ class SecurityConfiguration {
 		http.authorizeHttpRequests(requests -> requests
 			.requestMatchers(HttpMethod.POST, "/api/auth/signup", "/api/auth/login").permitAll()
 			.requestMatchers(HttpMethod.GET, "/actuator/health/readiness").permitAll()
+			.requestMatchers(HttpMethod.GET, "/uploads/**").permitAll()
+			.requestMatchers(HttpMethod.HEAD, "/uploads/**").permitAll()
 			.anyRequest().authenticated());
 		return http.build();
 	}
