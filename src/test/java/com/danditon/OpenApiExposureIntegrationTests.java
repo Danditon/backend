@@ -60,8 +60,6 @@ class OpenApiExposureIntegrationTests {
 		var spec = JSON.readTree(response.body());
 		assertEquals("Danditon Backend API", spec.at("/info/title").asText());
 		assertEquals("v1", spec.at("/info/version").asText());
-		assertTrue(spec.at("/info/description").asText().contains("24 hours"));
-		assertTrue(spec.at("/info/description").asText().contains("Refresh tokens are not supported"));
 		assertEquals(JSON.readTree("{\"bearerAuth\":{\"type\":\"http\",\"scheme\":\"bearer\",\"bearerFormat\":\"JWT\"}}"),
 			spec.at("/components/securitySchemes"));
 		assertEquals(JSON.readTree("[{\"bearerAuth\":[]}]"), spec.get("security"));

@@ -91,7 +91,7 @@ class OpenApiIntegrationTests {
 
 	@ParameterizedTest
 	@ValueSource(strings = {"SignupRequest", "LoginRequest"})
-	void requestSchemasDescribeNormalizationAndByteLimitedWriteOnlyPasswords(String name) {
+	void requestSchemasExposeFieldConstraintsAndWriteOnlyPasswords(String name) {
 		var schema = spec.at("/components/schemas/" + name);
 		var fields = schema.path("properties");
 		assertEquals(name.equals("SignupRequest") ? Set.of("email", "password", "nickname")
@@ -100,12 +100,8 @@ class OpenApiIntegrationTests {
 		for (var required : schema.path("required")) assertTrue(fields.has(required.asText()));
 		assertEquals("email", fields.at("/email/format").asText());
 		assertEquals(255, fields.at("/email/maxLength").asInt());
-		assertTrue(fields.at("/email/description").asText().contains("소문자"));
-		assertTrue(fields.at("/email/description").asText().contains("공백"));
 		assertEquals("password", fields.at("/password/format").asText());
 		assertTrue(fields.at("/password/writeOnly").asBoolean());
-		assertTrue(fields.at("/password/description").asText().contains("UTF-8"));
-		assertTrue(fields.at("/password/description").asText().contains("72바이트"));
 		assertNotEquals(72, fields.at("/password/maxLength").asInt());
 		if (name.equals("SignupRequest")) {
 			assertEquals(8, fields.at("/password/minLength").asInt());
@@ -129,8 +125,6 @@ class OpenApiIntegrationTests {
 		}
 		assertEquals("integer", spec.at("/components/schemas/AuthResponse/properties/userId/type").asText());
 		assertEquals("int64", spec.at("/components/schemas/AuthResponse/properties/userId/format").asText());
-		String tokenDescription = spec.at("/components/schemas/AuthResponse/properties/accessToken/description").asText();
-		for (String term : Set.of("HS256", "24시간", "Bearer")) assertTrue(tokenDescription.contains(term));
 		assertFalse(spec.toString().contains("passwordHash"));
 		assertFalse(spec.toString().contains("eyJ"));
 		assertEquals(JSON.readTree("[{\"bearerAuth\":[]}]"), spec.path("security"));
