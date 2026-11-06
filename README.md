@@ -6,7 +6,7 @@
 
 ## API (설계 계약 v0.3)
 
-아래는 API 명세 v0.3의 전체 설계 계약입니다. 현재 회원가입·로그인이 구현되어 있으며, 나머지 항목은 설계 계약으로만 안내합니다. `GET /users/me`를 포함한 다른 API의 구현 완료나 호출 가능 여부를 뜻하지 않습니다. 공개 API의 Base URL은 `/api`이고, 표의 경로는 이 기준의 상대 경로입니다.
+아래는 API 명세 v0.3의 전체 목록입니다. 회원가입·로그인, 퀘스트·수행 API와 내 정보(#3), 좋아요 토글(#10), 내가 등록한 퀘스트(#11), 내 수행 기록(#12)이 구현되어 있습니다. 공개 API의 Base URL은 `/api`이고, 표의 경로는 이 기준의 상대 경로입니다.
 
 | 기능 | API |
 |---|---|
@@ -19,19 +19,19 @@
 | 퀘스트 상세 | `GET /quests/{questId}` |
 | 수행 + AI 검증 | `POST /quests/{questId}/submissions` |
 | 수행 글 목록 (권한별) | `GET /quests/{questId}/submissions` |
-| 좋아요 토글 (퀘스트 등록자만) | `PATCH /submissions/{submissionId}/like` |
+| 좋아요 토글 (인증 사용자) | `PATCH /submissions/{submissionId}/like` |
 | 내가 등록한 퀘스트 | `GET /users/me/quests` |
 | 내 수행 기록 (PASSED만) | `GET /users/me/submissions` |
 
 ### 공통 설계 계약
 
-아래 퀘스트·수행·사진 관련 정책과 오류는 설계 기준입니다. 구현된 인증 API의 요청·응답과 오류는 다음 인증 섹션을 따릅니다.
+아래는 공통 정책입니다. 인증 API와 내 정보·목록·좋아요의 구체적인 계약은 각 구현 섹션을 따릅니다.
 
 - 회원가입·로그인을 제외한 모든 공개 API는 JWT `Authorization: Bearer {accessToken}`이 필요합니다. Access Token 만료는 24시간이며 Refresh Token은 없으므로 만료 시 재로그인합니다.
 - 응답에 공통 래퍼는 없고 성공은 데이터만, 에러는 `{code, message}`를 반환합니다. JSON 필드는 camelCase, 시간은 ISO-8601이며 MVP에서 페이징은 적용하지 않습니다.
 - 등록·수행은 `multipart/form-data`의 `request`(JSON)와 `photo`(파일) 파트를 사용합니다. 사진은 최대 1장·10MB·jpg/png/webp이며 HEIC는 FE에서 변환하거나 차단합니다. 사진은 서버 디스크에 저장하고 응답의 `photoUrl`은 전체 URL입니다.
 - `GENERAL`은 등록·수행 모두 글 필수·사진 선택이고, 수행 시 서버가 위치 200m 이내를 확인하면 성공합니다 (`similarity: null`). `IMAGE`는 등록·수행 모두 글·사진 필수이며, 위치 확인 후 기준 사진과 수행 사진의 임베딩 유사도로 검증합니다. 유사도 미달은 `201`과 `verifyStatus: "FAILED"`로 저장되며 재시도할 수 있습니다.
-- 주변 목록은 `lat`·`lng`가 필수이고 `radius`는 기본 50000m이며 `type`·`difficulty`로 필터링합니다. MVP 퀘스트는 `OPEN` 고정이고 목록은 내 퀘스트도 포함해 `isMine`으로 구분합니다.
+- 주변 목록은 `lat`·`lng`가 필수이고 `radius`는 기본 50000m이며 `type`·`difficulty`로 필터링합니다. 새 퀘스트는 `OPEN`으로 등록되고 주변 목록은 OPEN 퀘스트만 조회합니다. 내 퀘스트도 포함해 `isMine`으로 구분합니다.
 - 수행 글은 등록자(`AUTHOR`)와 PASSED 완료자(`COMPLETED`)에게 모든 수행자의 PASSED 글을, 그 외(`PERFORMER`)에게는 FAILED를 포함한 본인 결과만 반환합니다.
 
 | HTTP·code | 의미 |
@@ -40,7 +40,6 @@
 | `401 UNAUTHORIZED` | 토큰 없음·만료 |
 | `403 OUT_OF_RANGE` | 서버 위치 재검증에서 200m 밖이면 수행을 저장하지 않음 |
 | `403 SELF_QUEST` | 본인이 등록한 퀘스트 수행 금지 |
-| `403 FORBIDDEN` | 퀘스트 등록자가 아닌 사용자의 좋아요 등 권한 위반 |
 | `404 NOT_FOUND` | 퀘스트·수행 없음 |
 | `409 DUPLICATE_EMAIL` | 이미 가입된 이메일 |
 | `409 ALREADY_PASSED` | 이미 성공한 퀘스트 재수행 금지 (FAILED 후 재시도 허용) |
@@ -109,6 +108,22 @@
 
 비밀번호 불일치와 미가입 이메일은 같은 상태 코드와 본문을 반환합니다. 액세스 토큰은 HS256으로 서명한 JWT이며 유효 기간은 24시간입니다. Refresh Token은 제공하지 않으므로 만료되면 다시 로그인합니다. 인증이 필요한 API에는 `Authorization: Bearer <accessToken>` 헤더로 전달합니다.
 
+## 내 정보·목록·좋아요 API (구현됨)
+
+네 API 모두 JWT가 필요하며 성공 시 `200 OK`를 반환합니다. 토큰이 없거나 유효하지 않으면 `401 UNAUTHORIZED`입니다. 사용자 식별자는 토큰에서 읽으며 요청 쿼리의 userId로 다른 사용자를 선택할 수 없습니다.
+
+| 번호·API | 성공 응답 |
+|---|---|
+| #3 `GET /api/users/me` | `{userId, email, nickname, createdAt}`. 비밀번호·토큰은 포함하지 않음 |
+| #10 `PATCH /api/submissions/{submissionId}/like` | `{submissionId, isLiked}`. 요청 본문 없이 호출마다 false ↔ true 토글 |
+| #11 `GET /api/users/me/quests` | `[{questId, questTitle, questType, status, passedCount, createdAt}]` |
+| #12 `GET /api/users/me/submissions` | `[{submissionId, questId, questTitle, placeName, lat, lng, photoUrl, createdAt}]` |
+
+- #10은 인증된 모든 사용자가 호출할 수 있습니다. 등록자에게만 좋아요 버튼을 표시하는 제한은 프론트엔드 정책이며, 백엔드는 비등록자라는 이유로 `403 FORBIDDEN`을 반환하지 않습니다. 수행이 없으면 `404 NOT_FOUND`, 숫자가 아니거나 Long 범위를 넘는 ID는 `400 INVALID_INPUT`입니다.
+- #11은 본인이 등록한 모든 상태(OPEN·CLOSED)의 퀘스트를 반환합니다. `passedCount`는 PASSED 수행만 집계하고 없으면 0입니다.
+- #12는 본인의 PASSED 수행만 반환하며 FAILED는 제외합니다. 퀘스트 상태는 제한하지 않습니다. 퀘스트 ID·제목·장소·좌표는 퀘스트에서, 사진·생성 시간은 수행에서 가져옵니다. 사진은 전체 URL이고 사진이 없으면 null입니다.
+- 두 목록은 `createdAt DESC, id DESC` 순서이며 결과가 없으면 `[]`를 반환합니다. 페이징은 적용하지 않습니다.
+
 ## Swagger / OpenAPI (로컬)
 
 애플리케이션을 기본 포트 8080으로 실행한 뒤 다음 주소를 사용합니다.
@@ -117,7 +132,7 @@
 - [OpenAPI JSON](http://localhost:8080/v3/api-docs)
 - [OpenAPI YAML](http://localhost:8080/v3/api-docs.yaml)
 
-생성된 문서는 현재 구현된 회원가입·로그인 계약을 제공합니다. 위 전체 API 설계 목록과 구현 범위가 다릅니다. 문서와 UI 리소스에 대한 GET 허용은 다른 비즈니스 API의 인증을 해제하지 않습니다.
+생성된 문서는 구현된 API 계약을 제공합니다. 내 정보·좋아요·내 퀘스트·내 수행 기록도 포함하며, 인증이 필요한 경로에 bearerAuth를 적용합니다. 문서와 UI 리소스에 대한 GET 허용은 다른 비즈니스 API의 인증을 해제하지 않습니다.
 
 Swagger UI에서 회원가입 또는 로그인 응답의 `accessToken`을 복사해 **Authorize**에 토큰 문자열만 입력하세요. `Bearer ` 접두사는 UI가 붙입니다. 회원가입·로그인 자체에는 인증이 필요 없으며, 잘못된 Bearer 헤더를 직접 보내면 공개 경로라도 거부됩니다.
 

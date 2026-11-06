@@ -17,6 +17,7 @@ import com.danditon.quest.entity.Quest;
 import com.danditon.quest.entity.QuestType;
 import com.danditon.quest.repository.QuestRepository;
 import com.danditon.submission.dto.CreateSubmissionRequest;
+import com.danditon.submission.dto.SubmissionLikeResponse;
 import com.danditon.submission.dto.SubmissionListResponse;
 import com.danditon.submission.dto.SubmissionListResponse.ViewerRole;
 import com.danditon.submission.dto.SubmissionResultResponse;
@@ -97,6 +98,14 @@ public class SubmissionService {
 			fileStorage.delete(photoPath);
 			throw e;
 		}
+	}
+
+	@Transactional
+	public SubmissionLikeResponse toggleLike(Long submissionId) {
+		Submission submission = submissionRepository.findByIdForUpdate(submissionId)
+			.orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+		submission.toggleLike();
+		return new SubmissionLikeResponse(submission.getId(), submission.getIsLiked());
 	}
 
 	@Transactional(readOnly = true)

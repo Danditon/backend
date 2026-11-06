@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.annotation.DirtiesContext;
@@ -45,6 +46,33 @@ class OpenApiIntegrationTests {
 	@LocalServerPort private int port;
 	private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 	private JsonNode spec;
+
+	@ParameterizedTest
+	@CsvSource({
+		"/api/users/me, get, UserProfileResponse, false",
+		"/api/submissions/{submissionId}/like, patch, SubmissionLikeResponse, false",
+		"/api/users/me/quests, get, MyQuestResponse, true",
+		"/api/users/me/submissions, get, MySubmissionResponse, true"
+	})
+	void userAndLikeOperationsExposeSecuredSuccessSchemas(String path, String method, String schemaName, boolean array) {
+		var operation = spec.path("paths").path(path).path(method);
+		assertFalse(operation.isMissingNode());
+		assertEquals(JSON.readTree("[{\"bearerAuth\":[]}]"),
+			operation.has("security") ? operation.get("security") : spec.get("security"));
+		var content = operation.at("/responses/200/content");
+		assertFalse(content.isEmpty());
+		var schema = content.iterator().next().path("schema");
+		if (array) {
+			assertEquals("array", schema.path("type").asText());
+			schema = schema.path("items");
+		}
+		assertEquals("#/components/schemas/" + schemaName, schema.path("$ref").asText());
+		assertFalse(spec.at("/components/schemas/" + schemaName + "/properties").isEmpty());
+		if (method.equals("patch")) {
+			assertFalse(operation.path("description").asText().isBlank());
+			assertFalse(operation.path("responses").has("403"));
+		}
+	}
 
 	@BeforeAll
 	void fetchCurrentGeneratedDocument() throws Exception {
