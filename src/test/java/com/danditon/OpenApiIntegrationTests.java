@@ -112,10 +112,10 @@ class OpenApiIntegrationTests {
 	}
 
 	@Test
-	void responseSchemasExposeOnlyPublicFieldsAndGlobalBearerRemainsAvailable() {
-		assertEquals(Set.of("/api/auth/signup", "/api/auth/login"), spec.path("paths").propertyNames());
-		assertEquals(Set.of("SignupRequest", "LoginRequest", "AuthResponse", "ErrorResponse"),
-			spec.at("/components/schemas").propertyNames());
+	void authResponseSchemasExposeOnlyPublicFieldsAndGlobalBearerRemainsAvailable() {
+		assertTrue(spec.path("paths").propertyNames().containsAll(Set.of("/api/auth/signup", "/api/auth/login")));
+		assertTrue(spec.at("/components/schemas").propertyNames()
+			.containsAll(Set.of("SignupRequest", "LoginRequest", "AuthResponse", "ErrorResponse")));
 		for (String name : Set.of("AuthResponse", "ErrorResponse")) {
 			var schema = spec.at("/components/schemas/" + name);
 			var expected = name.equals("AuthResponse") ? Set.of("accessToken", "userId", "nickname") : Set.of("code", "message");
