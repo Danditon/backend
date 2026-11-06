@@ -19,6 +19,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -76,7 +77,7 @@ class OpenApiIntegrationTests {
 			: "{\"email\":\"member@example.com\",\"password\":\"<password>\"}"),
 			operation.at("/requestBody/content/application~1json/example"));
 		var responses = operation.path("responses");
-		assertEquals(action.equals("signup") ? Set.of("201", "400", "401", "409", "415", "500")
+		assertEquals(action.equals("signup") ? Set.of("201", "400", "409", "415", "500")
 			: Set.of("200", "400", "401", "415", "500"), responses.propertyNames());
 		for (String status : responses.propertyNames()) {
 			assertEquals(Set.of("application/json"), responses.path(status).path("content").propertyNames());
@@ -164,10 +165,34 @@ class OpenApiIntegrationTests {
 
 	@ParameterizedTest
 	@ValueSource(strings = {"signup", "login"})
-	void malformedBearerMatchesDocumented401(String action) throws Exception {
+	void malformedBearerStillAllowsDocumentedInputValidation(String action) throws Exception {
 		var response = send(HttpRequest.newBuilder(uri("/api/auth/" + action)).header("Content-Type", "application/json")
 			.header("Authorization", "Bearer malformed").POST(HttpRequest.BodyPublishers.ofString("{}")));
-		assertError(response, action, "401");
+		assertError(response, action, "400");
+	}
+
+	@ParameterizedTest(name = "ignored auth bearer {index}")
+	@MethodSource("com.danditon.SecurityIntegrationTests#ignoredBearerTokens")
+	void ignoredBearerSignupLoginAndCredentialErrorsMatchPublishedContract(String token) throws Exception {
+		String email = UUID.randomUUID() + "@example.com";
+		String body = JSON.writeValueAsString(Map.of("email", email, "password", "example-only-password", "nickname", "단디"));
+		var signup = post("signup", body, token);
+		assertEquals(201, signup.statusCode());
+		var registered = assertAuthResponse(signup);
+		var login = post("login", body, token);
+		assertEquals(200, login.statusCode());
+		var loggedIn = assertAuthResponse(login);
+		assertEquals(registered.path("userId"), loggedIn.path("userId"));
+		assertError(post("login", JSON.writeValueAsString(Map.of("email", email, "password", "wrong-password")), token),
+			"login", "401");
+	}
+
+	@Test
+	void unrelatedPublicDocumentStillRejectsMalformedBearer() throws Exception {
+		var response = send(HttpRequest.newBuilder(uri("/v3/api-docs"))
+			.header("Authorization", "Bearer malformed").GET());
+		assertEquals(401, response.statusCode());
+		assertEquals(JSON.readTree(ERRORS.get("401")), JSON.readTree(response.body()));
 	}
 
 	@Test
@@ -198,6 +223,11 @@ class OpenApiIntegrationTests {
 	private HttpResponse<String> post(String action, String body) throws Exception {
 		return send(HttpRequest.newBuilder(uri("/api/auth/" + action)).header("Content-Type", "application/json")
 			.POST(HttpRequest.BodyPublishers.ofString(body)));
+	}
+
+	private HttpResponse<String> post(String action, String body, String token) throws Exception {
+		return send(HttpRequest.newBuilder(uri("/api/auth/" + action)).header("Content-Type", "application/json")
+			.header("Authorization", "Bearer " + token).POST(HttpRequest.BodyPublishers.ofString(body)));
 	}
 
 	private URI uri(String path) { return URI.create("http://127.0.0.1:" + port + path); }

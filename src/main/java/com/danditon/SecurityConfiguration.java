@@ -10,7 +10,10 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.web.util.matcher.OrRequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
@@ -22,6 +25,10 @@ class SecurityConfiguration {
 			UrlBasedCorsConfigurationSource corsConfigurationSource) throws Exception {
 		var authentication = new JwtAuthenticationConverter();
 		authentication.setJwtGrantedAuthoritiesConverter(jwt -> List.of());
+		var paths = PathPatternRequestMatcher.withDefaults();
+		var publicAuthPosts = new OrRequestMatcher(paths.matcher(HttpMethod.POST, "/api/auth/signup"),
+			paths.matcher(HttpMethod.POST, "/api/auth/login"));
+		var bearerTokens = new DefaultBearerTokenResolver();
 		http.csrf(AbstractHttpConfigurer::disable)
 			.formLogin(AbstractHttpConfigurer::disable)
 			.httpBasic(AbstractHttpConfigurer::disable)
@@ -31,10 +38,11 @@ class SecurityConfiguration {
 			.cors(cors -> cors.configurationSource(corsConfigurationSource))
 			.exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(errors).accessDeniedHandler(errors))
 			.oauth2ResourceServer(resource -> resource
+				.bearerTokenResolver(request -> publicAuthPosts.matches(request) ? null : bearerTokens.resolve(request))
 				.authenticationEntryPoint(errors).accessDeniedHandler(errors)
 				.jwt(jwt -> jwt.jwtAuthenticationConverter(authentication)));
 		http.authorizeHttpRequests(requests -> requests
-			.requestMatchers(HttpMethod.POST, "/api/auth/signup", "/api/auth/login").permitAll()
+			.requestMatchers(publicAuthPosts).permitAll()
 			.requestMatchers(HttpMethod.GET, "/swagger-ui.html", "/swagger-ui/**",
 				"/v3/api-docs", "/v3/api-docs.yaml", "/v3/api-docs/swagger-config").permitAll()
 			.requestMatchers(HttpMethod.GET, "/actuator/health/readiness").permitAll()
