@@ -5,6 +5,13 @@ die() { printf '%s\n' "$*" >&2; exit 1; }
 [[ ${SHA:-} =~ ^[0-9a-f]{40}$ ]] || die INVALID_SHA
 [[ ${IMAGE_DIGEST:-} =~ ^sha256:[0-9a-f]{64}$ ]] || die INVALID_DIGEST
 [[ ${EC2_HOST:-} =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]] || die INVALID_HOST
+JWT_SECRET_BASE64=${JWT_SECRET_BASE64:-}
+[[ $JWT_SECRET_BASE64 =~ ^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$ ]] || die INVALID_JWT_SECRET
+decoded_size=$(printf '%s' "$JWT_SECRET_BASE64" | base64 --decode 2>/dev/null | wc -c) || die INVALID_JWT_SECRET
+[[ $decoded_size -ge 32 ]] || die INVALID_JWT_SECRET
+[[ $(printf '%s' "$JWT_SECRET_BASE64" | base64 --decode | base64 -w 0) == "$JWT_SECRET_BASE64" ]] || die INVALID_JWT_SECRET
+jwt_secret_line=JWT_SECRET_BASE64=$JWT_SECRET_BASE64
+unset JWT_SECRET_BASE64
 work=${RUNNER_TEMP:?}/danditon-deploy
 mkdir -m 700 "$work"
 cleanup() {
@@ -67,7 +74,9 @@ else
 fi
 REMOTE
 incoming_created=false
-timeout 780 ssh "${SSH_OPTS[@]}" "$target" "bash /opt/danditon/releases/$SHA/deploy.sh $SHA"
+printf '%s\n' "$jwt_secret_line" | timeout 780 ssh "${SSH_OPTS[@]}" "$target" \
+    "bash /opt/danditon/releases/$SHA/deploy.sh $SHA"
+unset jwt_secret_line
 timeout 30 ssh "${SSH_OPTS[@]}" "$target" "bash -s -- '$SHA' '$IMAGE_DIGEST'" <<'REMOTE'
 set -Eeuo pipefail
 release=/opt/danditon/releases/$1
