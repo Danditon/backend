@@ -45,28 +45,6 @@
 | `409 ALREADY_PASSED` | 이미 성공한 퀘스트 재수행 금지 (FAILED 후 재시도 허용) |
 | `502 AI_ERROR` | LLM·임베딩 호출 실패: 등록 전체 롤백 (저장한 사진 파일 삭제 포함), 수행 미저장. FAILED로 기록하지 않고 재시도 안내 |
 
-## Swagger / OpenAPI (로컬)
-
-애플리케이션을 기본 포트 8080으로 실행한 뒤 다음 주소를 사용합니다.
-
-- [Swagger UI](http://localhost:8080/swagger-ui.html)
-- [OpenAPI JSON](http://localhost:8080/v3/api-docs)
-- [OpenAPI YAML](http://localhost:8080/v3/api-docs.yaml)
-
-생성된 문서는 구현된 API 계약을 제공합니다. 내 정보·좋아요·내 퀘스트·내 수행 기록도 포함하며, 인증이 필요한 경로에 bearerAuth를 적용합니다. 문서와 UI 리소스에 대한 GET 허용은 다른 비즈니스 API의 인증을 해제하지 않습니다.
-
-Swagger UI에서 회원가입 또는 로그인 응답의 `accessToken`을 복사해 **Authorize**에 토큰 문자열만 입력하세요. `Bearer ` 접두사는 UI가 붙입니다. 회원가입·로그인 자체에는 인증이 필요 없으며, 잘못된 Bearer 헤더를 직접 보내면 공개 경로라도 거부됩니다.
-
-문서 경로 확인용 명령(Windows에서는 `curl` 대신 `curl.exe` 사용 가능):
-
-```bash
-curl -i http://localhost:8080/swagger-ui.html
-curl -i http://localhost:8080/v3/api-docs
-curl -i http://localhost:8080/v3/api-docs.yaml
-```
-
-Swagger UI 진입 주소는 `/swagger-ui/index.html`로 리다이렉트됩니다. 위 주소는 로컬 실행용이며 배포 상태를 나타내지 않습니다.
-
 ## 기술 스택
 
 | 구분 | 기술·버전 |
@@ -76,7 +54,6 @@ Swagger UI 진입 주소는 `/swagger-ui/index.html`로 리다이렉트됩니다
 | 프레임워크 | Spring Boot 4.1.2, Spring Web MVC |
 | 의존성 관리 | Spring Dependency Management 플러그인 1.1.7 |
 | 데이터·보안·검증 | Spring Data JPA, Spring Security, Spring Validation |
-| API 문서 | springdoc-openapi-starter-webmvc-ui 3.2.0 (Swagger UI / OpenAPI) |
 | 개발 도구 | Lombok |
 | 데이터베이스 드라이버 | MySQL Connector/J (local/prod), H2 (테스트 전용) |
 | 테스트 | JUnit 5, Spring Boot 테스트 스타터 |

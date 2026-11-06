@@ -1,10 +1,8 @@
 package com.danditon.common.exception;
 
-import io.swagger.v3.oas.annotations.media.Schema;
-
 public record ErrorResponse(
-	@Schema(requiredMode = Schema.RequiredMode.REQUIRED, example = "INVALID_INPUT") String code,
-	@Schema(requiredMode = Schema.RequiredMode.REQUIRED, example = "입력값이 올바르지 않아요") String message
+	String code,
+	String message
 ) {
 
 	public static ErrorResponse of(ErrorCode errorCode) {
