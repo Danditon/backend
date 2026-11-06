@@ -136,7 +136,9 @@ class SecurityIntegrationTests {
 	@ParameterizedTest
 	@ValueSource(strings = {"/api/auth/signup", "/api/auth/login"})
 	void onlyExactPostAuthRoutesAreAnonymous(String path) throws Exception {
-		assertEquals(200, send(request("POST", path)).statusCode());
+		var empty = send(request("POST", path));
+		assertEquals(400, empty.statusCode());
+		assertEquals("{\"code\":\"INVALID_INPUT\",\"message\":\"입력값이 올바르지 않아요\"}", empty.body());
 		assertEquals(401, send(request("HEAD", path)).statusCode());
 		for (String method : new String[]{"GET", "PUT", "PATCH", "DELETE", "OPTIONS"}) {
 			unauthorized(send(request(method, path)));
@@ -219,7 +221,8 @@ class SecurityIntegrationTests {
 		var headers = new java.util.TreeMap<>(response.headers().map());
 		headers.remove("set-cookie");
 		record("HTTP_QA " + request.method() + " " + request.uri().getPath() + " status="
-			+ response.statusCode() + " headers=" + headers + " body=" + response.body());
+			+ response.statusCode() + " headers=" + headers + " body=" + response.body()
+				.replaceAll("(\"accessToken\"\\s*:\\s*\")[^\"]*(\")", "$1[REDACTED]$2"));
 		return response;
 	}
 
@@ -271,6 +274,5 @@ class SecurityIntegrationTests {
 	static class ProbeController {
 		@RequestMapping("/security/principal") String principal(Principal principal) { return principal.getName(); }
 		@RequestMapping("/security/authorities") String authorities(Authentication auth) { return auth.getAuthorities().toString(); }
-		@RequestMapping({"/api/auth/signup", "/api/auth/login"}) String anonymous() { return "public-fixture"; }
 	}
 }

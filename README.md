@@ -6,7 +6,7 @@
 
 ## API (설계 계약 v0.3)
 
-아래는 API 명세 v0.3의 설계 계약이며, 현재 구현 완료나 호출 가능 여부를 뜻하지 않습니다. 공개 API의 Base URL은 `/api`이고, 표의 경로는 이 기준의 상대 경로입니다.
+아래는 API 명세 v0.3의 전체 설계 계약입니다. 현재 회원가입·로그인이 구현되어 있으며, 나머지 항목은 설계 계약으로만 안내합니다. `GET /users/me`를 포함한 다른 API의 구현 완료나 호출 가능 여부를 뜻하지 않습니다. 공개 API의 Base URL은 `/api`이고, 표의 경로는 이 기준의 상대 경로입니다.
 
 | 기능 | API |
 |---|---|
@@ -23,7 +23,9 @@
 | 내가 등록한 퀘스트 | `GET /users/me/quests` |
 | 내 수행 기록 (PASSED만) | `GET /users/me/submissions` |
 
-### 공통 계약
+### 공통 설계 계약
+
+아래 퀘스트·수행·사진 관련 정책과 오류는 설계 기준입니다. 구현된 인증 API의 요청·응답과 오류는 다음 인증 섹션을 따릅니다.
 
 - 회원가입·로그인을 제외한 모든 공개 API는 JWT `Authorization: Bearer {accessToken}`이 필요합니다. Access Token 만료는 24시간이며 Refresh Token은 없으므로 만료 시 재로그인합니다.
 - 응답에 공통 래퍼는 없고 성공은 데이터만, 에러는 `{code, message}`를 반환합니다. JSON 필드는 camelCase, 시간은 ISO-8601이며 MVP에서 페이징은 적용하지 않습니다.
@@ -44,7 +46,90 @@
 | `409 ALREADY_PASSED` | 이미 성공한 퀘스트 재수행 금지 (FAILED 후 재시도 허용) |
 | `502 AI_ERROR` | LLM·임베딩 호출 실패: 등록 전체 롤백 (저장한 사진 파일 삭제 포함), 수행 미저장. FAILED로 기록하지 않고 재시도 안내 |
 
+## 인증 API (구현됨)
 
+두 API는 `Content-Type: application/json`으로 요청하며, 인증 헤더 없이 호출할 수 있습니다. 다만 잘못된 Bearer 토큰이나 형식이 잘못된 Bearer `Authorization` 헤더를 함께 보내면 공개 인증 API에서도 `401 UNAUTHORIZED`로 거부됩니다.
+
+### 회원가입
+
+`POST /api/auth/signup` 요청:
+
+```json
+{
+  "email": "member@example.com",
+  "password": "<password-at-least-8-chars>",
+  "nickname": "단디"
+}
+```
+
+성공 시 `201 Created`와 다음 데이터를 반환하며 바로 로그인 상태로 사용할 수 있습니다.
+
+```json
+{
+  "accessToken": "<access-token>",
+  "userId": 1,
+  "nickname": "단디"
+}
+```
+
+### 로그인
+
+`POST /api/auth/login` 요청:
+
+```json
+{
+  "email": "member@example.com",
+  "password": "<password>"
+}
+```
+
+성공 시 `200 OK`와 회원가입과 동일한 `{accessToken, userId, nickname}` 구조를 반환합니다. 위 비밀번호·토큰 예시는 자리표시자입니다.
+
+### 입력값과 오류
+
+| 필드 | 적용 규칙 |
+|---|---|
+| `email` (공통) | 필수 이메일 형식. 앞뒤 공백을 제거하고 소문자로 변환한 뒤 최대 255자. 정규화된 이메일로 중복 확인·로그인 |
+| `password` (회원가입) | 필수, 최소 8자, UTF-8 인코딩 기준 최대 72바이트 |
+| `password` (로그인) | 필수, UTF-8 인코딩 기준 최대 72바이트. 회원가입의 최소 8자 규칙은 적용하지 않음 |
+| `nickname` (회원가입) | 필수, 앞뒤 공백을 제거한 뒤 1–50자 |
+
+비밀번호는 앞뒤 공백 제거(trim) 등 정규화를 하지 않습니다. 공백만 있는 비밀번호는 허용하지 않으며, 72바이트는 글자 수 제한과 다르므로 한글 등 다중 바이트 문자를 입력할 때 주의하세요.
+
+오류 응답은 공통 래퍼 없이 `{code, message}`입니다.
+
+| 상황 | HTTP·code | message |
+|---|---|---|
+| 필수값 누락, 형식·길이 위반, 잘못된 JSON | `400 INVALID_INPUT` | 입력값이 올바르지 않아요 |
+| 가입된 이메일로 회원가입 | `409 DUPLICATE_EMAIL` | 이미 가입된 이메일이에요 |
+| 로그인 비밀번호 불일치 또는 미가입 이메일 | `401 UNAUTHORIZED` | 로그인이 필요해요 |
+| 잘못된 Bearer 토큰·Bearer 헤더 | `401 UNAUTHORIZED` | 로그인이 필요해요 |
+| 지원하지 않는 요청 Content-Type | `415 INVALID_INPUT` | 입력값이 올바르지 않아요 |
+| 예상하지 못한 서버 오류 | `500 INTERNAL_ERROR` | 서버 오류가 발생했어요 |
+
+비밀번호 불일치와 미가입 이메일은 같은 상태 코드와 본문을 반환합니다. 액세스 토큰은 HS256으로 서명한 JWT이며 유효 기간은 24시간입니다. Refresh Token은 제공하지 않으므로 만료되면 다시 로그인합니다. 인증이 필요한 API에는 `Authorization: Bearer <accessToken>` 헤더로 전달합니다.
+
+## Swagger / OpenAPI (로컬)
+
+애플리케이션을 기본 포트 8080으로 실행한 뒤 다음 주소를 사용합니다.
+
+- [Swagger UI](http://localhost:8080/swagger-ui.html)
+- [OpenAPI JSON](http://localhost:8080/v3/api-docs)
+- [OpenAPI YAML](http://localhost:8080/v3/api-docs.yaml)
+
+생성된 문서는 현재 구현된 회원가입·로그인 계약을 제공합니다. 위 전체 API 설계 목록과 구현 범위가 다릅니다. 문서와 UI 리소스에 대한 GET 허용은 다른 비즈니스 API의 인증을 해제하지 않습니다.
+
+Swagger UI에서 회원가입 또는 로그인 응답의 `accessToken`을 복사해 **Authorize**에 토큰 문자열만 입력하세요. `Bearer ` 접두사는 UI가 붙입니다. 회원가입·로그인 자체에는 인증이 필요 없으며, 잘못된 Bearer 헤더를 직접 보내면 공개 경로라도 거부됩니다.
+
+문서 경로 확인용 명령(Windows에서는 `curl` 대신 `curl.exe` 사용 가능):
+
+```bash
+curl -i http://localhost:8080/swagger-ui.html
+curl -i http://localhost:8080/v3/api-docs
+curl -i http://localhost:8080/v3/api-docs.yaml
+```
+
+Swagger UI 진입 주소는 `/swagger-ui/index.html`로 리다이렉트됩니다. 위 주소는 로컬 실행용이며 배포 상태를 나타내지 않습니다.
 
 ## 기술 스택
 
@@ -55,6 +140,7 @@
 | 프레임워크 | Spring Boot 4.1.2, Spring Web MVC |
 | 의존성 관리 | Spring Dependency Management 플러그인 1.1.7 |
 | 데이터·보안·검증 | Spring Data JPA, Spring Security, Spring Validation |
+| API 문서 | springdoc-openapi-starter-webmvc-ui 3.2.0 (Swagger UI / OpenAPI) |
 | 개발 도구 | Lombok |
 | 데이터베이스 드라이버 | MySQL Connector/J (local/prod), H2 (테스트 전용) |
 | 테스트 | JUnit 5, Spring Boot 테스트 스타터 |

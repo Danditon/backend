@@ -1,8 +1,10 @@
 package com.danditon.security;
 
 import java.text.ParseException;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.Base64;
+import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 
 import com.nimbusds.jwt.SignedJWT;
@@ -15,14 +17,16 @@ import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.BadJwtException;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtTimestampValidator;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 
 @Configuration(proxyBeanMethods = false)
 public class JwtSecurityConfiguration {
 
 	@Bean
-	JwtDecoder jwtDecoder(@Value("${security.jwt.secret-base64:}") String encoded) {
+	SecretKey jwtSecretKey(@Value("${security.jwt.secret-base64:}") String encoded) {
 		byte[] key;
 		try {
 			key = Base64.getDecoder().decode(encoded);
@@ -32,7 +36,22 @@ public class JwtSecurityConfiguration {
 		if (key.length < 32) {
 			throw invalidKey();
 		}
-		var decoder = NimbusJwtDecoder.withSecretKey(new SecretKeySpec(key, "HmacSHA256"))
+		return new SecretKeySpec(key, "HmacSHA256");
+	}
+
+	@Bean
+	JwtEncoder jwtEncoder(SecretKey key) {
+		return NimbusJwtEncoder.withSecretKey(key).algorithm(MacAlgorithm.HS256).build();
+	}
+
+	@Bean
+	Clock jwtClock() {
+		return Clock.systemUTC();
+	}
+
+	@Bean
+	JwtDecoder jwtDecoder(SecretKey key) {
+		var decoder = NimbusJwtDecoder.withSecretKey(key)
 			.macAlgorithm(MacAlgorithm.HS256).build();
 		decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(
 			new JwtTimestampValidator(Duration.ofSeconds(60)), jwt -> {
