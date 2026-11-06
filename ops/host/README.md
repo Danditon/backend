@@ -18,8 +18,9 @@ root-equivalent authority**, including reading host secrets via mounted paths;
 mode 600 is protection against ordinary reads, not against Docker administration.
 
 The root-owned `/etc/danditon/.env` is generated once and retained on reruns.
-Variables are MYSQL_ROOT_PASSWORD, PROD_DB_PASSWORD, PROD_DB_USERNAME and
-PROD_DB_URL. Only the DB receives MYSQL_ROOT_PASSWORD. Never print production
+The host generates only MYSQL_ROOT_PASSWORD, PROD_DB_PASSWORD, PROD_DB_USERNAME and
+PROD_DB_URL. JWT_SECRET_BASE64 is supplied by the GitHub production Environment
+Secret during deployment and updated in the same file. Only the DB receives MYSQL_ROOT_PASSWORD. Never print production
 Compose config or inspect container environment. The release script validates the
 full SHA/digest APP_IMAGE in each release's image.env. Bootstrap does not start DB.
 

@@ -85,6 +85,7 @@ jobs:
           EC2_HOST: ${{ vars.EC2_HOST }}
           SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.EC2_SSH_KNOWN_HOSTS }}
+          JWT_SECRET_BASE64: ${{ secrets.JWT_SECRET_BASE64 }}
         run: bash ops/ci/deploy.sh
       - if: always()
         run: rm -rf -- "$RUNNER_TEMP/danditon-deploy"

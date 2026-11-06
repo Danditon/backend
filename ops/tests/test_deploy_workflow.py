@@ -24,6 +24,15 @@ def main() -> None:
     assert jobs['deploy']['concurrency'] == {
         'group': 'danditon-production', 'cancel-in-progress': 'false',
     }
+    deploy_step = next(
+        step for step in jobs['deploy']['steps']
+        if step.get('name') == 'Transfer and deploy verified release'
+    )
+    assert deploy_step['env']['JWT_SECRET_BASE64'] == '${{ secrets.JWT_SECRET_BASE64 }}', \
+        'JWT_PRODUCTION_SECRET_REQUIRED'
+    scripts = Path('ops/ci/deploy.sh').read_text(encoding='utf-8') + \
+        Path('ops/deploy/deploy.sh').read_text(encoding='utf-8')
+    assert 'jwt.env' not in scripts, 'NO_PER_RELEASE_JWT_FILE'
     # Then only the production job receives production secrets.
     for name, job in jobs.items():
         assert 1 <= int(job['timeout-minutes']) <= 20, 'BOUNDED_JOB'
