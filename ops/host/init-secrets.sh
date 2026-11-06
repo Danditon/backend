@@ -22,28 +22,20 @@ if [[ -e $file || -L $file ]]; then
         decoded_size=$(printf '%s' "$jwt" | base64 --decode 2>/dev/null | wc -c) || exit 1
         [[ $decoded_size -ge 32 ]] || exit 1
         [[ $(printf '%s' "$jwt" | base64 --decode | base64 -w 0) == "$jwt" ]] || exit 1
-        exit 0
     fi
+    exit 0
 fi
 temporary=''
 trap 'rm -f -- "$temporary"' EXIT
 trap 'exit 1' HUP INT TERM
 temporary=$(mktemp "$directory/.env.XXXXXX")
 random() { od -An -N32 -tx1 /dev/urandom | tr -d ' \n'; }
-jwt=$(head -c 32 /dev/urandom | base64 -w 0)
-[[ $(printf '%s' "$jwt" | base64 --decode | wc -c) == 32 ]] || exit 1
-if [[ -f $file ]]; then
-    cat -- "$file" > "$temporary"
-    if [[ $(tail -c 1 "$file" | wc -l) == 0 ]]; then printf '\n' >> "$temporary"; fi
-else
-    {
-        printf 'MYSQL_ROOT_PASSWORD=%s\n' "$(random)"
-        printf 'PROD_DB_PASSWORD=%s\n' "$(random)"
-        printf 'PROD_DB_USERNAME=danditon\n'
-        printf 'PROD_DB_URL=jdbc:mysql://db:3306/danditon\n'
-    } > "$temporary"
-fi
-printf 'JWT_SECRET_BASE64=%s\n' "$jwt" >> "$temporary"
+{
+    printf 'MYSQL_ROOT_PASSWORD=%s\n' "$(random)"
+    printf 'PROD_DB_PASSWORD=%s\n' "$(random)"
+    printf 'PROD_DB_USERNAME=danditon\n'
+    printf 'PROD_DB_URL=jdbc:mysql://db:3306/danditon\n'
+} > "$temporary"
 chmod 600 "$temporary"
 chown root:root "$temporary"
 mv -T "$temporary" "$file"

@@ -21,6 +21,7 @@
 |---|---|---|
 | Secret | `EC2_SSH_PRIVATE_KEY` | 별도 배포용 Ed25519 비밀키 전체, 보호된 입력으로 설치 |
 | Secret | `EC2_SSH_KNOWN_HOSTS` | 아래 콘솔 지문과 일치한 EIP의 Ed25519 known_hosts 한 줄 |
+| Secret | `JWT_SECRET_BASE64` | 운영 JWT 서명용 32바이트 이상 난수의 표준 Base64 값 |
 | Variable | `EC2_HOST` | 해당 인스턴스에 연결한 고정 EIP |
 
 `EC2_USER=danditon-deploy`는 검토된 workflow의 고정값이다. DB 비밀은 GitHub에 등록하지 않는다. production key는 deploy job만 받는다. 게시 job만 job-scoped `packages: write`와 `GITHUB_TOKEN` stdin 로그인 권한을 갖는다. EC2에는 PAT·registry 로그인·GitHub token·AWS access key를 저장하지 않는다. [환경 설정 근거](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments).
@@ -104,7 +105,7 @@ ssh "${OPERATOR_OPTS[@]}" "ubuntu@$EC2_HOST" \
   'sudo bash /home/ubuntu/danditon-bootstrap/ops/host/bootstrap.sh /home/ubuntu/danditon-bootstrap/deploy.pub'
 ```
 
-[bootstrap](../ops/host/bootstrap.sh)은 공식 Docker Ubuntu 패키지, Compose plugin, Nginx/fail2ban/age, 2 GiB swap, SSH/sudoers/백업 timer를 설치한다. [비밀 초기화](../ops/host/init-secrets.sh)는 호스트에서 난수를 생성하고 root:root 600 `/etc/danditon/.env`에 `MYSQL_ROOT_PASSWORD`, `PROD_DB_PASSWORD`, `PROD_DB_USERNAME`, `PROD_DB_URL`, `JWT_SECRET_BASE64`를 기록한다. JWT 키는 32바이트 난수를 한 줄의 표준 Base64로 인코딩한다. 기존 정상 DB 값과 유효한 JWT 키는 파일 바이트 그대로 보존한다. `.env.example`은 이름 목록일 뿐 배포용 비밀 파일이 아니다. root-invoked Compose가 host env 다음 release `image.env`를 읽는다.
+[bootstrap](../ops/host/bootstrap.sh)은 공식 Docker Ubuntu 패키지, Compose plugin, Nginx/fail2ban/age, 2 GiB swap, SSH/sudoers/백업 timer를 설치한다. [비밀 초기화](../ops/host/init-secrets.sh)는 호스트에서 DB용 난수만 생성하고 root:root 600 `/etc/danditon/.env`에 `MYSQL_ROOT_PASSWORD`, `PROD_DB_PASSWORD`, `PROD_DB_USERNAME`, `PROD_DB_URL`을 기록한다. JWT는 호스트에서 생성하지 않는다. GitHub `production` Environment Secret `JWT_SECRET_BASE64`를 deploy job이 검증해 SSH 표준입력으로 전달하고, 검증된 이미지의 일회성 network-none 컨테이너가 기존 DB 항목을 보존하면서 같은 파일의 JWT 항목만 잠금·원자 교체한다. 값은 명령행, 릴리스 파일, 로그에 남기지 않는다. `.env.example`은 이름 목록일 뿐 배포용 비밀 파일이 아니다. root-invoked Compose가 host env 다음 release `image.env`를 읽는다.
 
 기존 DB 전용 `.env`는 JWT 설정을 요구하는 앱 배포 전에 검토된 `ops/host/init-secrets.sh`를 운영자 셸에서 `sudo bash ops/host/init-secrets.sh /etc/danditon`으로 실행해 이관한다. 같은 `flock` 안에서 기존 바이트를 유지한 임시 파일에 JWT 키만 추가하고 원자적으로 교체하며 root:root 600을 유지한다. 재실행은 키를 바꾸지 않는다. symlink, 다른 소유자/권한, 누락·중복·빈 DB 항목, 중복 JWT 항목, 잘못된 Base64 또는 디코딩 후 32바이트 미만인 JWT 키는 변경 없이 실패한다. lock은 최대 60초 기다리며, 실패한 파일을 지워 DB 비밀번호를 재생성하는 방식으로 복구하지 않는다. 비밀값은 출력하거나 GitHub에 등록하지 않는다.
 
@@ -208,7 +209,7 @@ rm -- /tmp/danditon-live-rollback.log
 
 ## 키 교체·폐기와 SSH 분실
 
-`JWT_SECRET_BASE64`는 단일 HMAC 키다. 초기화기를 재실행해도 자동 교체되지 않으며 다중 키 동시 검증·무중단 키 순환은 지원하지 않는다. 계획된 교체나 유출 대응에서는 같은 비밀 파일 lock을 확보한 운영자가 새 32바이트 이상 난수의 한 줄 표준 Base64 값으로 해당 항목만 원자 교체하고 root:root 600을 유지한 뒤 앱 컨테이너를 재생성한다. DB 항목은 보존한다. 새 키를 적용한 앱은 옛 키로 서명된 만료 전 토큰도 모두 거부하므로 사용자 재인증이 필요하다. 키 값이나 파일 전체를 명령행 인자·로그·Git에 남기지 않는다. 앱 적용과 재인증 영향을 운영 장부에 기록한다.
+`JWT_SECRET_BASE64`는 GitHub `production` Environment Secret으로 관리되는 단일 HMAC 키다. 다중 키 동시 검증·무중단 키 순환은 지원하지 않는다. 계획된 교체나 유출 대응에서는 Secret을 새 32바이트 이상 난수의 표준 Base64 값으로 교체하고 배포를 실행한다. 같은 SHA 재실행도 `/etc/danditon/.env`의 JWT 항목을 갱신하고 앱을 재생성하며 DB 항목은 보존한다. 새 키를 적용한 앱은 옛 키로 서명된 만료 전 토큰도 모두 거부하므로 사용자 재인증이 필요하다. 키 값이나 파일 전체를 명령행 인자·로그·Git에 남기지 않는다. 앱 적용과 재인증 영향을 운영 장부에 기록한다.
 
 운영 키와 배포 키는 공유하지 않는다. 예정된 교체 때 새 공개키를 기존 키와 잠시 함께 `authorized_keys`에 설치하고 소유자/700 디렉터리/600 파일 권한을 유지한다. `danditon-deploy`의 새 줄에는 기존 `restrict` 옵션을 유지한다. 새 키로 별도 세션 인증을 확인한 다음 GitHub `EC2_SSH_PRIVATE_KEY`를 교체하고 최신 develop 배포를 확인한다. 그 뒤 옛 공개키 줄과 옛 private key 사본을 폐기한다. operator는 새 operator 세션이 sudo와 터널까지 동작하는 것을 확인한 후 옛 키를 제거한다. bootstrap 재실행은 배포 authorized_keys를 제공된 한 키로 교체하므로 이중 키 교체 중에는 사용하지 않는다.
 

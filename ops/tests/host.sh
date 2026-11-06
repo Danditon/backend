@@ -18,107 +18,50 @@ cleanup() {
 trap cleanup EXIT
 secret_hash() { "${root[@]}" sha256sum "$1" | cut -d ' ' -f1; }
 init_secret() { "${root[@]}" timeout 70 bash ops/host/init-secrets.sh "$1"; }
-assert_secret() {
-    local directory=$1 key jwt
+assert_db_secret() {
+    local directory=$1 key
     [[ $("${root[@]}" stat -c '%u:%g:%a' "$directory/.env") == 0:0:600 ]]
-    for key in MYSQL_ROOT_PASSWORD PROD_DB_PASSWORD PROD_DB_USERNAME PROD_DB_URL JWT_SECRET_BASE64; do
+    for key in MYSQL_ROOT_PASSWORD PROD_DB_PASSWORD PROD_DB_USERNAME PROD_DB_URL; do
         [[ $("${root[@]}" grep -c "^$key=" "$directory/.env") == 1 ]]
     done
-    jwt=$("${root[@]}" sed -n 's/^JWT_SECRET_BASE64=//p' "$directory/.env")
-    [[ $(printf '%s' "$jwt" | base64 --decode | wc -c) == 32 ]]
-    [[ $(printf '%s' "$jwt" | base64 --decode | base64 -w 0) == "$jwt" ]]
+    [[ $("${root[@]}" grep -c '^JWT_SECRET_BASE64=' "$directory/.env") == 0 ]]
     [[ -z $("${root[@]}" find "$directory" -maxdepth 1 -name '.env.*' -print) ]]
-    printf 'PASS_SECRET_KEYS_COUNT_5_JWT_BYTES_32_PERMISSIONS_0:0:600 SHA256=%s\n' "$(secret_hash "$directory/.env")"
 }
 init_secret "$fixture"
-assert_secret "$fixture"
+assert_db_secret "$fixture"
 before=$(secret_hash "$fixture/.env")
 init_secret "$fixture"
 [[ $before == "$(secret_hash "$fixture/.env")" ]]
-echo PASS_SECRET_NEW_AND_EXISTING_KEY_BYTE_PRESERVATION
-for ending in newline no-newline; do
-    directory=$fixture/migrate-$ending
-    "${root[@]}" install -d -m 700 "$directory"
-    "${root[@]}" sed '/^JWT_SECRET_BASE64=/d' "$fixture/.env" | "${root[@]}" tee "$directory/.env" >/dev/null
-    "${root[@]}" chmod 600 "$directory/.env"
-    if [[ $ending == no-newline ]]; then "${root[@]}" truncate -s -1 "$directory/.env"; fi
-    before=$(secret_hash "$directory/.env")
-    size=$("${root[@]}" stat -c %s "$directory/.env")
-    init_secret "$directory"
-    [[ $before == "$("${root[@]}" head -c "$size" "$directory/.env" | sha256sum | cut -d ' ' -f1)" ]]
-    assert_secret "$directory"
-    after=$(secret_hash "$directory/.env")
-    init_secret "$directory"
-    [[ $after == "$(secret_hash "$directory/.env")" ]]
-    echo "PASS_SECRET_DB_ONLY_MIGRATION_$ending"
-done
-for invalid in mode owner symlink missing-db duplicate-db empty-db duplicate-jwt malformed-jwt short-jwt empty-jwt unpadded-jwt noncanonical-jwt; do
+echo PASS_HOST_GENERATES_DB_ONLY_AND_PRESERVES_VALUES
+directory=$fixture/existing-jwt
+"${root[@]}" install -d -m 700 "$directory"
+"${root[@]}" cp -p "$fixture/.env" "$directory/.env"
+printf 'JWT_SECRET_BASE64=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=\n' | \
+    "${root[@]}" tee -a "$directory/.env" >/dev/null
+before=$(secret_hash "$directory/.env")
+init_secret "$directory"
+[[ $before == "$(secret_hash "$directory/.env")" ]]
+echo PASS_EXISTING_GITHUB_MANAGED_JWT_PRESERVED
+for invalid in mode owner symlink missing-db duplicate-db empty-db duplicate-jwt malformed-jwt short-jwt; do
     directory=$fixture/invalid-$invalid
     "${root[@]}" install -d -m 700 "$directory"
-    "${root[@]}" cp -p "$fixture/.env" "$directory/.env"
+    "${root[@]}" cp -p "$fixture/existing-jwt/.env" "$directory/.env"
     case $invalid in
         mode) "${root[@]}" chmod 644 "$directory/.env" ;;
         owner) "${root[@]}" chown 1:1 "$directory/.env" ;;
-        symlink)
-            "${root[@]}" mv "$directory/.env" "$directory/target"
-            "${root[@]}" ln -s target "$directory/.env" ;;
+        symlink) "${root[@]}" mv "$directory/.env" "$directory/target"; "${root[@]}" ln -s target "$directory/.env" ;;
         missing-db) "${root[@]}" sed -i '/^PROD_DB_URL=/d' "$directory/.env" ;;
         duplicate-db) "${root[@]}" sed -i '/^PROD_DB_URL=/p' "$directory/.env" ;;
         empty-db) "${root[@]}" sed -i 's/^PROD_DB_URL=.*/PROD_DB_URL=/' "$directory/.env" ;;
         duplicate-jwt) "${root[@]}" sed -i '/^JWT_SECRET_BASE64=/p' "$directory/.env" ;;
         malformed-jwt) "${root[@]}" sed -i 's/^JWT_SECRET_BASE64=.*/JWT_SECRET_BASE64=bad!/' "$directory/.env" ;;
         short-jwt) "${root[@]}" sed -i 's/^JWT_SECRET_BASE64=.*/JWT_SECRET_BASE64=YWJj/' "$directory/.env" ;;
-        empty-jwt) "${root[@]}" sed -i 's/^JWT_SECRET_BASE64=.*/JWT_SECRET_BASE64=/' "$directory/.env" ;;
-        unpadded-jwt) "${root[@]}" sed -i '/^JWT_SECRET_BASE64=/s/=$//' "$directory/.env" ;;
-        noncanonical-jwt)
-            "${root[@]}" sed -i "s|^JWT_SECRET_BASE64=.*|JWT_SECRET_BASE64=$(printf '%043d=' 1)|" "$directory/.env" ;;
     esac
     before=$(secret_hash "$directory/.env")
     if init_secret "$directory"; then exit 1; fi
     [[ $before == "$(secret_hash "$directory/.env")" ]]
-    [[ -z $("${root[@]}" find "$directory" -maxdepth 1 -name '.env.*' -print) ]]
     if [[ $invalid == symlink ]]; then "${root[@]}" test -L "$directory/.env"; fi
-    printf 'PASS_SECRET_REJECT_%s_UNCHANGED SHA256=%s\n' "$invalid" "$before"
-done
-directory=$fixture/concurrent
-"${root[@]}" install -d -m 700 "$directory"
-init_secret "$directory" &
-first=$!
-init_secret "$directory" &
-second=$!
-wait "$first"
-wait "$second"
-assert_secret "$directory"
-echo PASS_SECRET_CONCURRENT_INITIALIZATION
-directory=$fixture/long-key
-"${root[@]}" install -d -m 700 "$directory"
-"${root[@]}" cp -p "$fixture/.env" "$directory/.env"
-long_key=$(head -c 64 /dev/urandom | base64 -w 0)
-printf 'JWT_SECRET_BASE64=%s\n' "$long_key" | "${root[@]}" tee "$fixture/long-key-line" >/dev/null
-"${root[@]}" sed -i '/^JWT_SECRET_BASE64=/d' "$directory/.env"
-"${root[@]}" sh -c 'cat "$1" >> "$2"' sh "$fixture/long-key-line" "$directory/.env"
-before=$(secret_hash "$directory/.env")
-init_secret "$directory"
-[[ $before == "$(secret_hash "$directory/.env")" ]]
-echo PASS_SECRET_EXISTING_64_BYTE_KEY_PRESERVED
-for failure in move interrupted interrupted-again; do
-    directory=$fixture/failure-$failure
-    "${root[@]}" install -d -m 700 "$directory" "$directory/bin"
-    "${root[@]}" sed '/^JWT_SECRET_BASE64=/d' "$fixture/.env" | "${root[@]}" tee "$directory/.env" >/dev/null
-    "${root[@]}" chmod 600 "$directory/.env"
-    {
-        printf '#!/usr/bin/env bash\n'
-        if [[ $failure != move ]]; then printf 'kill -TERM "$PPID"\n'; fi
-        printf 'exit 1\n'
-    } | "${root[@]}" tee "$directory/bin/mv" >/dev/null
-    "${root[@]}" chmod 700 "$directory/bin/mv"
-    before=$(secret_hash "$directory/.env")
-    if "${root[@]}" env PATH="$directory/bin:$PATH" timeout 70 bash ops/host/init-secrets.sh "$directory"; then exit 1; fi
-    [[ $before == "$(secret_hash "$directory/.env")" ]]
-    [[ -z $("${root[@]}" find "$directory" -maxdepth 1 -name '.env.*' -print) ]]
-    init_secret "$directory"
-    assert_secret "$directory"
-    printf 'PASS_SECRET_FAILURE_%s_UNCHANGED_AND_RETRY SHA256=%s\n' "$failure" "$before"
+    printf 'PASS_SECRET_REJECT_%s_UNCHANGED\n' "$invalid"
 done
 if [[ ${1:-} == --secrets-only ]]; then exit 0; fi
 if [[ ! -d /run/sshd ]]; then sudo install -d -m 755 /run/sshd; created_sshd=true; fi

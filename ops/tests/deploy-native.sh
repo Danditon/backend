@@ -39,6 +39,8 @@ export SSH_PORT=$port
 export FIXTURE="$work"
 export SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 export IMAGE_DIGEST=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+valid_jwt=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+export JWT_SECRET_BASE64=$valid_jwt
 export EC2_HOST=127.0.0.1 RUNNER_TEMP="$work/runner" GITHUB_RUN_ID=123 GITHUB_RUN_ATTEMPT=1
 export SSH_PRIVATE_KEY SSH_KNOWN_HOSTS
 SSH_PRIVATE_KEY=$(cat "$work/key")
@@ -82,6 +84,9 @@ cat > "$work/source/ops/deploy/deploy.sh" <<'EOF'
 #!/bin/bash
 set -euo pipefail
 [[ ! -f /opt/danditon/remote-failure ]] || exit 37
+IFS= read -r runtime_secret_line
+[[ $runtime_secret_line == JWT_SECRET_BASE64=* ]]
+printf '%s\n' "$runtime_secret_line" > /opt/danditon/runtime-secret
 digest=$(cat "/opt/danditon/releases/$1/image-digest.txt")
 printf '{"image":"ghcr.io/danditon/backend:%s@%s"}\n' "$1" "$digest" > /opt/danditon/current.json
 printf 'APP_IMAGE=ghcr.io/danditon/backend:%s@%s\n' "$1" "$digest" > "/opt/danditon/releases/$1/image.env"
@@ -91,11 +96,13 @@ for _attempt in {1..30}; do
     if timeout 3 /usr/bin/ssh -p "$port" -i "$work/key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null danditon-deploy@127.0.0.1 true 2>/dev/null; then break; fi
     sleep 1
 done
-for scenario in invalid wrong-key private stale partial digest remote running old-health-path happy; do
+for scenario in invalid missing-jwt malformed-jwt wrong-key private stale partial digest remote running old-health-path happy; do
     export SCENARIO=$scenario
-    docker exec "$name" bash -c 'rm -rf /opt/danditon/releases/* /opt/danditon/releases/.incoming-* /opt/danditon/current.json /opt/danditon/remote-failure /opt/danditon/wrong-running'
-    test_sha=$SHA test_hosts=$SSH_KNOWN_HOSTS
+    docker exec "$name" bash -c 'rm -rf /opt/danditon/releases/* /opt/danditon/releases/.incoming-* /opt/danditon/current.json /opt/danditon/runtime-secret /opt/danditon/remote-failure /opt/danditon/wrong-running'
+    test_sha=$SHA test_hosts=$SSH_KNOWN_HOSTS test_jwt=$valid_jwt
     [[ $scenario != invalid ]] || test_sha='bad;injection'
+    [[ $scenario != missing-jwt ]] || test_jwt=''
+    [[ $scenario != malformed-jwt ]] || test_jwt='not-base64!'
     [[ $scenario != wrong-key ]] || test_hosts="[127.0.0.1]:$port $(cut -d' ' -f1-2 "$work/key.pub")"
     [[ $scenario != remote ]] || docker exec "$name" touch /opt/danditon/remote-failure
     [[ $scenario != running ]] || docker exec "$name" touch /opt/danditon/wrong-running
@@ -106,13 +113,18 @@ for scenario in invalid wrong-key private stale partial digest remote running ol
     fi
     # When executing the production runner script through native SSH and SCP.
     set +e
-    (cd "$work/source" && PATH="$work/bin:$PATH" SHA="$test_sha" SSH_KNOWN_HOSTS="$test_hosts" bash "$runner_script") > "$work/$scenario.log" 2>&1
+    (cd "$work/source" && PATH="$work/bin:$PATH" SHA="$test_sha" SSH_KNOWN_HOSTS="$test_hosts" \
+        JWT_SECRET_BASE64="$test_jwt" bash "$runner_script") > "$work/$scenario.log" 2>&1
     code=$?
     set -e
     # Then errors are red, before inappropriate mutation, and secrets are removed.
     [[ ! -e $RUNNER_TEMP/danditon-deploy ]]
     case "$scenario" in
-        happy) [[ $code == 0 ]]; grep -q DEPLOY_VERIFIED "$work/$scenario.log" ;;
+        happy)
+            [[ $code == 0 ]]
+            grep -q DEPLOY_VERIFIED "$work/$scenario.log"
+            docker exec "$name" grep -Fxq "JWT_SECRET_BASE64=$valid_jwt" /opt/danditon/runtime-secret
+            docker exec "$name" test ! -e "/opt/danditon/releases/$SHA/jwt.env" ;;
         remote) [[ $code == 37 ]] ;;
         partial) [[ $code == 23 ]]; docker exec "$name" test ! -e "/opt/danditon/releases/$SHA" ;;
         running) [[ $code != 0 ]] ;;
@@ -120,6 +132,7 @@ for scenario in invalid wrong-key private stale partial digest remote running ol
         *) [[ $code != 0 ]]; docker exec "$name" test ! -e "/opt/danditon/releases/$SHA" ;;
     esac
     [[ $scenario != private ]] || grep -q GHCR_NOT_PUBLIC "$work/$scenario.log"
+    if grep -Fq "$valid_jwt" "$work/$scenario.log"; then exit 1; fi
     if [[ -n ${EVIDENCE_DIR:-} ]]; then
         printf 'scenario=%s exit=%s runner_credentials_removed=true\n' "$scenario" "$code" >> "$work/$scenario.log"
         cp "$work/$scenario.log" "$EVIDENCE_DIR/task-10-ssh-ghcr-$scenario.log"

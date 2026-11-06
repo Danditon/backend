@@ -33,6 +33,10 @@ image_id() {
 shift 2
 printf '%s\n' "$*" >> "$FIXTURE/docker.log"
 case "$1" in
+    run)
+        IFS= read -r runtime_secret_line
+        printf '%s\n' "$runtime_secret_line" > "$FIXTURE/runtime-secret"
+        printf 'RUNTIME_JWT_UPDATED\n' ;;
     pull)
         tag=${2##*:}
         if ! grep -Eq "^ghcr.io/danditon/backend ${tag} " "$FIXTURE/images"; then
@@ -120,6 +124,8 @@ a=$(printf 'a%.0s' {1..40})
 b=$(printf 'b%.0s' {1..40})
 c=$(printf 'c%.0s' {1..40})
 digest="sha256:$(printf 'd%.0s' {1..64})"
+default_runtime_secret_line="JWT_SECRET_BASE64=$(printf '0123456789abcdef0123456789abcdef' | base64 -w 0)"
+runtime_secret_line=$default_runtime_secret_line
 printf '%s\n' "$digest" > "$work/digest"
 setup() {
     local case_name=$1 sha
@@ -127,6 +133,8 @@ setup() {
     mkdir -p "$root/releases"
     /bin/rm -f "$work/db" "$work/running" "$work/bad" "$work/allbad" "$work/interrupt" \
         "$work/post-promotion" "$work/post-cleanup" "$work/fail-restore" "$work/fail-remove" "$work/fail-cleanup" "$work/qa-recovery-failure"
+    /bin/rm -f "$work/runtime-secret"
+    runtime_secret_line=$default_runtime_secret_line
     /bin/rm -f "$work/fail-image-cleanup"
     : > "$work/docker.log"
     : > "$work/removed"
@@ -141,7 +149,7 @@ setup() {
     done
     printf '%s\n' "$a" > "$work/head"
 }
-deploy() { bash "$root/releases/$1/deploy.sh" "$1"; }
+deploy() { printf '%s\n' "$runtime_secret_line" | bash "$root/releases/$1/deploy.sh" "$1"; }
 fails() {
     local label=$1 expected
     shift
@@ -176,7 +184,10 @@ if grep -Fxq "ghcr.io/danditon/backend:$a" "$work/removed"; then exit 1; fi
 if grep -Fxq "ghcr.io/danditon/backend:$b" "$work/removed"; then exit 1; fi
 grep -Eq '^ghcr.io/danditon/backend latest ' "$work/images"
 deploy "$b" | grep -q ALREADY_CURRENT
-printf 'PASS: A->B, metadata, database untouched, retained current/previous, removed old SHA image, ignored non-SHA tag, idempotent retry\n'
+runtime_secret_line="JWT_SECRET_BASE64=$(printf 'fedcba9876543210fedcba9876543210' | base64 -w 0)"
+deploy "$b" | grep -q ALREADY_CURRENT
+grep -Fxq "$runtime_secret_line" "$work/runtime-secret"
+printf 'PASS: A->B, metadata, database untouched, retained current/previous, removed old SHA image, ignored non-SHA tag, idempotent retry and JWT rotation\n'
 setup cleanup_warning
 touch "$work/fail-image-cleanup"
 deploy "$a" > "$work/result" 2>&1
