@@ -101,9 +101,12 @@ public class SubmissionService {
 	}
 
 	@Transactional
-	public SubmissionLikeResponse toggleLike(Long submissionId) {
+	public SubmissionLikeResponse toggleLike(Long userId, Long submissionId) {
 		Submission submission = submissionRepository.findByIdForUpdate(submissionId)
 			.orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+		if (!submission.getQuest().getAuthor().getId().equals(userId)) {
+			throw new BusinessException(ErrorCode.FORBIDDEN);
+		}
 		submission.toggleLike();
 		return new SubmissionLikeResponse(submission.getId(), submission.getIsLiked());
 	}
