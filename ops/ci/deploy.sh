@@ -13,7 +13,7 @@ decoded_size=$(printf '%s' "$JWT_SECRET_BASE64" | base64 --decode 2>/dev/null | 
 jwt_secret_line=JWT_SECRET_BASE64=$JWT_SECRET_BASE64
 unset JWT_SECRET_BASE64
 GEMINI_API_KEY=${GEMINI_API_KEY:-}
-[[ $GEMINI_API_KEY =~ ^[A-Za-z0-9_-]+$ ]] || die INVALID_GEMINI_API_KEY
+[[ $GEMINI_API_KEY =~ ^[A-Za-z0-9._-]+$ ]] || die INVALID_GEMINI_API_KEY
 gemini_secret_line=GEMINI_API_KEY=$GEMINI_API_KEY
 unset GEMINI_API_KEY
 work=${RUNNER_TEMP:?}/danditon-deploy

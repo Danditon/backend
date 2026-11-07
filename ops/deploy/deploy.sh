@@ -56,7 +56,7 @@ IFS= read -r gemini_secret_line
 jwt_secret=${jwt_secret_line#JWT_SECRET_BASE64=}
 gemini_secret=${gemini_secret_line#GEMINI_API_KEY=}
 [[ $jwt_secret =~ ^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$ ]]
-[[ $gemini_secret =~ ^[A-Za-z0-9_-]+$ ]]
+[[ $gemini_secret =~ ^[A-Za-z0-9._-]+$ ]]
 decoded_size=$(printf "%s" "$jwt_secret" | base64 --decode 2>/dev/null | wc -c)
 [[ $decoded_size -ge 32 ]]
 [[ $(printf "%s" "$jwt_secret" | base64 --decode | base64 -w 0) == "$jwt_secret" ]]
