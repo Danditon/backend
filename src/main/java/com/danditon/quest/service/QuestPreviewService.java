@@ -1,7 +1,11 @@
 package com.danditon.quest.service;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
 import com.danditon.common.exception.BusinessException;
@@ -9,7 +13,6 @@ import com.danditon.common.exception.ErrorCode;
 import com.danditon.common.llm.LlmClient;
 import com.danditon.quest.dto.PreviewRequest;
 import com.danditon.quest.dto.PreviewResponse;
-import com.danditon.quest.entity.QuestType;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,20 +25,24 @@ import tools.jackson.databind.ObjectMapper;
 @RequiredArgsConstructor
 public class QuestPreviewService {
 
-	private static final String SYSTEM_PROMPT = """
-		너는 '그리움 퀘스트' 서비스의 퀘스트 작성 도우미야.
-		떠난 사람이 그리워하는 장소 정보를 받아, 남아 있는 사람이나 여행자가 대신 다녀와 안부를 전할 수 있는 퀘스트로 정리해.
-		반드시 아래 JSON 객체 하나만 출력해. 설명·코드블록 표시는 쓰지 마.
-		{"quest_title": "...", "quest_description": "...", "difficulty": 1~3 정수, "difficulty_reason": "...", "keywords": ["...", "..."]}
-		난이도 기준: 1 = 방문·촬영만 / 2 = 영업 확인·구매 등 행동 1개 추가 / 3 = 시간대·구도 등 조건이 까다로움.
-		quest_title은 25자 이내, quest_description은 한두 문장, keywords는 3개 안팎의 짧은 단어.
-		""";
+	private static final int MIN_KEYWORDS = 1;
+	private static final int MAX_KEYWORDS = 5;
 
 	private final LlmClient llmClient;
 	private final ObjectMapper objectMapper;
+	// 영한 님(ai 저장소 llm/quest_prompt.md)이 테스트한 프롬프트. 바꾸면 ai 쪽과 같이 맞춘다
+	private final String systemPrompt = loadSystemPrompt();
+
+	private static String loadSystemPrompt() {
+		try (var in = new ClassPathResource("llm/quest_prompt.md").getInputStream()) {
+			return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+		} catch (IOException e) {
+			throw new UncheckedIOException("llm/quest_prompt.md를 읽지 못했어요", e);
+		}
+	}
 
 	public PreviewResponse preview(PreviewRequest request) {
-		String answer = llmClient.complete(SYSTEM_PROMPT, userPrompt(request));
+		String answer = llmClient.complete(systemPrompt, userPrompt(request));
 		try {
 			return parse(answer);
 		} catch (RuntimeException e) {
@@ -45,16 +52,13 @@ public class QuestPreviewService {
 	}
 
 	private String userPrompt(PreviewRequest request) {
-		String typeGuide = request.questType() == QuestType.IMAGE
-			? "수행자는 등록자가 올린 기준 사진과 같은 구도로 사진을 찍어야 해."
-			: "수행자는 글(안부)을 남기고 사진은 선택이야.";
+		// 종류별 규칙은 시스템 프롬프트에 있으므로 입력값만 같은 형식으로 보낸다
 		return """
-			장소 이름: %s
+			퀘스트 종류: %s
+			장소명: %s
 			주소: %s
-			그리움 사연: %s
-			퀘스트 종류: %s (%s)
-			""".formatted(request.placeName(), request.address(), request.longingText(),
-			request.questType(), typeGuide);
+			그리운 이유: %s""".formatted(request.questType(), request.placeName(), request.address(),
+			request.longingText());
 	}
 
 	// LLM 응답의 snake_case를 camelCase 응답으로 변환한다. 코드블록으로 감싸 보내도 JSON 부분만 쓴다
@@ -69,11 +73,24 @@ public class QuestPreviewService {
 		String title = text(node, "quest_title", "questTitle");
 		String description = text(node, "quest_description", "questDescription");
 		String reason = text(node, "difficulty_reason", "difficultyReason");
-		int difficulty = node.path("difficulty").asInt(0);
+		// Gemini는 스키마의 min/max 등을 강제하지 않으므로 직접 검증한다
+		JsonNode difficultyNode = node.path("difficulty");
+		int difficulty = difficultyNode.isIntegralNumber() ? difficultyNode.asInt(0) : 0;
 		if (difficulty < 1 || difficulty > 3) {
-			throw new IllegalArgumentException("난이도가 1~3이 아니에요: " + difficulty);
+			throw new IllegalArgumentException("난이도가 1~3이 아니에요: " + difficultyNode);
 		}
-		List<String> keywords = node.path("keywords").valueStream().map(JsonNode::asString).toList();
+		JsonNode keywordNodes = node.path("keywords");
+		if (!keywordNodes.isArray() || keywordNodes.size() < MIN_KEYWORDS || keywordNodes.size() > MAX_KEYWORDS) {
+			throw new IllegalArgumentException("keywords는 " + MIN_KEYWORDS + "~" + MAX_KEYWORDS + "개여야 해요");
+		}
+		List<String> keywords = keywordNodes.valueStream()
+			.map(k -> {
+				if (!k.isString() || k.asString().isBlank()) {
+					throw new IllegalArgumentException("keywords에 빈 값이 있어요");
+				}
+				return k.asString();
+			})
+			.toList();
 		return new PreviewResponse(title, description, difficulty, reason, keywords);
 	}
 
