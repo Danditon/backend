@@ -68,21 +68,18 @@ class SubmissionLikeApiIntegrationTests {
 	void fixtures() {
 		var author = users.save(User.create(UUID.randomUUID() + "@example.com", "hash", "author"));
 		performer = users.save(User.create(UUID.randomUUID() + "@example.com", "hash", "performer"));
-		quest = quests.save(Quest.create(author, "place", "address", 35.8714, 128.6014,
-			"memory", null, null, QuestType.GENERAL, "title", "description", 2));
+		quest = createQuest(author);
 		submissionId = submissions.save(Submission.create(quest, performer, "hello", null, VerifyStatus.PASSED, null)).getId();
-		authorToken = token(author.getId());
-		performerToken = token(performer.getId());
+		authorToken = token(author.getId().toString());
+		performerToken = token(performer.getId().toString());
 	}
 
-	@ParameterizedTest
-	@ValueSource(booleans = {true, false})
-	void togglesFalseTrueFalseForAuthorAndNonAuthor(boolean author) throws Exception {
-		// Given
-		String token = author ? authorToken : performerToken;
+	@Test
+	void authorTogglesFalseTrueFalse() throws Exception {
+		assertFalse(submissions.findById(submissionId).orElseThrow().getIsLiked());
 		// When
-		var first = patch(submissionId.toString(), token);
-		var second = patch(submissionId.toString(), token);
+		var first = patch(submissionId.toString(), authorToken);
+		var second = patch(submissionId.toString(), authorToken);
 		// Then
 		assertLike(first, true);
 		assertLike(second, false);
@@ -90,11 +87,33 @@ class SubmissionLikeApiIntegrationTests {
 	}
 
 	@Test
-	void failedSubmissionCanBeLikedByNonAuthor() throws Exception {
+	void performerCannotLikeSubmission() throws Exception {
+		var response = patch(submissionId.toString(), performerToken);
+
+		assertForbidden(response);
+		assertFalse(submissions.findById(submissionId).orElseThrow().getIsLiked());
+		assertListedLike(false);
+	}
+
+	@Test
+	void authorOfAnotherQuestCannotUnlikeSubmission() throws Exception {
+		var otherAuthor = users.save(User.create(UUID.randomUUID() + "@example.com", "hash", "other author"));
+		createQuest(otherAuthor);
+		assertLike(patch(submissionId.toString(), authorToken), true);
+
+		var response = patch(submissionId.toString(), token(otherAuthor.getId().toString()));
+
+		assertForbidden(response);
+		assertTrue(submissions.findById(submissionId).orElseThrow().getIsLiked());
+		assertListedLike(true);
+	}
+
+	@Test
+	void failedSubmissionCanBeLikedByAuthor() throws Exception {
 		// Given
 		submissionId = submissions.save(Submission.create(quest, performer, "retry", null, VerifyStatus.FAILED, 0.2)).getId();
 		// When
-		var response = patch(submissionId.toString(), performerToken);
+		var response = patch(submissionId.toString(), authorToken);
 		// Then
 		assertLike(response, true);
 		assertTrue(submissions.findById(submissionId).orElseThrow().getIsLiked());
@@ -115,9 +134,14 @@ class SubmissionLikeApiIntegrationTests {
 		// Given / When
 		var response = patch(submissionId.toString(), token);
 		// Then
-		assertEquals(401, response.statusCode());
-		assertEquals(UNAUTHORIZED, response.body());
-		assertFalse(submissions.findById(submissionId).orElseThrow().getIsLiked());
+		assertUnauthorizedWithoutMutation(response);
+	}
+
+	@Test
+	void signedNonnumericSubjectReturnsUnauthorizedWithoutMutation() throws Exception {
+		var response = patch(submissionId.toString(), token("not-a-user-id"));
+
+		assertUnauthorizedWithoutMutation(response);
 	}
 
 	@ParameterizedTest
@@ -136,21 +160,21 @@ class SubmissionLikeApiIntegrationTests {
 		// Given
 		assertListedLike(false);
 		// When / Then: re-read API #9 after each successful mutation
-		assertLike(patch(submissionId.toString(), performerToken), true);
+		assertLike(patch(submissionId.toString(), authorToken), true);
 		assertListedLike(true);
 		assertLike(patch(submissionId.toString(), authorToken), false);
 		assertListedLike(false);
 	}
 
-	@RepeatedTest(10)
-	void concurrentRequestsEachToggleOnce() throws Exception {
+	@RepeatedTest(value = 10, name = "{displayName} {currentRepetition}/{totalRepetitions}")
+	void concurrentAuthorRequestsEachToggleOnce() throws Exception {
 		// Given
 		var ready = new CountDownLatch(2);
 		var start = new CountDownLatch(1);
 		var executor = Executors.newFixedThreadPool(2);
 		try {
-			var first = executor.submit(() -> concurrentPatch(authorToken, ready, start));
-			var second = executor.submit(() -> concurrentPatch(performerToken, ready, start));
+			var first = executor.submit(() -> concurrentPatch(ready, start));
+			var second = executor.submit(() -> concurrentPatch(ready, start));
 			assertTrue(ready.await(5, TimeUnit.SECONDS));
 			// When
 			start.countDown();
@@ -170,10 +194,21 @@ class SubmissionLikeApiIntegrationTests {
 		}
 	}
 
-	private HttpResponse<String> concurrentPatch(String token, CountDownLatch ready, CountDownLatch start) throws Exception {
+	private HttpResponse<String> concurrentPatch(CountDownLatch ready, CountDownLatch start) throws Exception {
 		ready.countDown();
 		assertTrue(start.await(5, TimeUnit.SECONDS));
-		return patch(submissionId.toString(), token);
+		return patch(submissionId.toString(), authorToken);
+	}
+
+	private void assertForbidden(HttpResponse<String> response) {
+		assertEquals(403, response.statusCode());
+		assertEquals(JSON.readTree("{\"code\":\"FORBIDDEN\",\"message\":\"권한이 없어요\"}"), JSON.readTree(response.body()));
+	}
+
+	private void assertUnauthorizedWithoutMutation(HttpResponse<String> response) {
+		assertEquals(401, response.statusCode());
+		assertEquals(UNAUTHORIZED, response.body());
+		assertFalse(submissions.findById(submissionId).orElseThrow().getIsLiked());
 	}
 
 	private void assertListedLike(boolean expected) throws Exception {
@@ -207,8 +242,13 @@ class SubmissionLikeApiIntegrationTests {
 
 	private URI uri(String path) { return URI.create("http://127.0.0.1:" + port + path); }
 
-	private String token(Long userId) {
-		var claims = JwtClaimsSet.builder().subject(userId.toString())
+	private Quest createQuest(User author) {
+		return quests.save(Quest.create(author, "place", "address", 35.8714, 128.6014,
+			"memory", null, null, QuestType.GENERAL, "title", "description", 2));
+	}
+
+	private String token(String subject) {
+		var claims = JwtClaimsSet.builder().subject(subject)
 			.issuedAt(Instant.now()).expiresAt(Instant.now().plusSeconds(300)).build();
 		return encoder.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims)).getTokenValue();
 	}

@@ -19,7 +19,7 @@
 | 퀘스트 상세 | `GET /quests/{questId}` |
 | 수행 + AI 검증 | `POST /quests/{questId}/submissions` |
 | 수행 글 목록 (권한별) | `GET /quests/{questId}/submissions` |
-| 좋아요 토글 (인증 사용자) | `PATCH /submissions/{submissionId}/like` |
+| 좋아요 토글 (해당 퀘스트 등록자만) | `PATCH /submissions/{submissionId}/like` |
 | 내가 등록한 퀘스트 | `GET /users/me/quests` |
 | 내 수행 기록 (PASSED만) | `GET /users/me/submissions` |
 
@@ -40,6 +40,7 @@
 | `401 UNAUTHORIZED` | 토큰 없음·만료 |
 | `403 OUT_OF_RANGE` | 서버 위치 재검증에서 200m 밖이면 수행을 저장하지 않음 |
 | `403 SELF_QUEST` | 본인이 등록한 퀘스트 수행 금지 |
+| `403 FORBIDDEN` | 해당 퀘스트의 등록자가 아닌 사용자가 좋아요 토글 시도 |
 | `404 NOT_FOUND` | 퀘스트·수행 없음 |
 | `409 DUPLICATE_EMAIL` | 이미 가입된 이메일 |
 | `409 ALREADY_PASSED` | 이미 성공한 퀘스트 재수행 금지 (FAILED 후 재시도 허용) |
