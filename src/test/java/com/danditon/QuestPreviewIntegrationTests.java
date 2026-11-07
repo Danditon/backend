@@ -59,6 +59,19 @@ class QuestPreviewIntegrationTests {
 	}
 
 	@Test
+	void keywordCountOrBlankKeywordBecomesAiError() throws Exception {
+		String tooMany = "{\"quest_title\":\"a\",\"quest_description\":\"b\",\"difficulty\":1,\"difficulty_reason\":\"c\","
+			+ "\"keywords\":[\"1\",\"2\",\"3\",\"4\",\"5\",\"6\"]}";
+		when(llmClient.complete(anyString(), anyString())).thenReturn(tooMany);
+		preview(BODY).andExpect(status().isBadGateway()).andExpect(jsonPath("$.code").value("AI_ERROR"));
+
+		String blank = "{\"quest_title\":\"a\",\"quest_description\":\"b\",\"difficulty\":1,\"difficulty_reason\":\"c\","
+			+ "\"keywords\":[\"학창시절\",\" \"]}";
+		when(llmClient.complete(anyString(), anyString())).thenReturn(blank);
+		preview(BODY).andExpect(status().isBadGateway()).andExpect(jsonPath("$.code").value("AI_ERROR"));
+	}
+
+	@Test
 	void missingFieldIsInvalidInput() throws Exception {
 		preview("{\"placeName\":\"a\"}")
 			.andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_INPUT"));
