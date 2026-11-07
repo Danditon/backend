@@ -39,23 +39,27 @@ validate_record() {
     (cd "$directory" && sha256sum --check --strict --status SHA256SUMS) || return 1
     [[ $(cat "$directory/image.env") == "APP_IMAGE=$(jq -r '.image' "$record")" ]]
 }
-update_runtime_jwt() {
-    local directory=$1 secret_line=$2 runtime_image
+update_runtime_secrets() {
+    local directory=$1 jwt_secret_line=$2 gemini_secret_line=$3 runtime_image
     runtime_image=$(cut -d= -f2- "$directory/image.env")
     [[ $runtime_image =~ ^ghcr\.io/danditon/backend:[0-9a-f]{40}@sha256:[0-9a-f]{64}$ ]] || return 1
-    printf '%s\n' "$secret_line" | docker_cmd run --rm --interactive --network none \
+    printf '%s\n' "$jwt_secret_line" "$gemini_secret_line" | docker_cmd run --rm --interactive --network none \
         --read-only --user 0:0 --cap-drop ALL --security-opt no-new-privileges \
         --mount type=bind,src=/etc/danditon,dst=/runtime \
         --entrypoint /bin/bash "$runtime_image" -c '
 set -Eeuo pipefail
 umask 077
-IFS= read -r secret_line
-[[ $secret_line == JWT_SECRET_BASE64=* ]]
-secret=${secret_line#JWT_SECRET_BASE64=}
-[[ $secret =~ ^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$ ]]
-decoded_size=$(printf "%s" "$secret" | base64 --decode 2>/dev/null | wc -c)
+IFS= read -r jwt_secret_line
+IFS= read -r gemini_secret_line
+[[ $jwt_secret_line == JWT_SECRET_BASE64=* ]]
+[[ $gemini_secret_line == GEMINI_API_KEY=* ]]
+jwt_secret=${jwt_secret_line#JWT_SECRET_BASE64=}
+gemini_secret=${gemini_secret_line#GEMINI_API_KEY=}
+[[ $jwt_secret =~ ^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$ ]]
+[[ $gemini_secret =~ ^[A-Za-z0-9._-]+$ ]]
+decoded_size=$(printf "%s" "$jwt_secret" | base64 --decode 2>/dev/null | wc -c)
 [[ $decoded_size -ge 32 ]]
-[[ $(printf "%s" "$secret" | base64 --decode | base64 -w 0) == "$secret" ]]
+[[ $(printf "%s" "$jwt_secret" | base64 --decode | base64 -w 0) == "$jwt_secret" ]]
 file=/runtime/.env
 [[ -f $file && ! -L $file && $(stat -c "%u:%g:%a" "$file") == 0:0:600 ]]
 exec 9>/runtime/.secrets.lock
@@ -65,15 +69,16 @@ for key in MYSQL_ROOT_PASSWORD PROD_DB_PASSWORD PROD_DB_USERNAME PROD_DB_URL; do
     grep -q "^$key=." "$file"
 done
 [[ $(grep -c "^JWT_SECRET_BASE64=" "$file" || true) -le 1 ]]
+[[ $(grep -c "^GEMINI_API_KEY=" "$file" || true) -le 1 ]]
 temporary=$(mktemp /runtime/.env.XXXXXX)
 trap "rm -f -- \"$temporary\"" EXIT
-grep -v "^JWT_SECRET_BASE64=" "$file" > "$temporary"
-printf "JWT_SECRET_BASE64=%s\n" "$secret" >> "$temporary"
+grep -Ev "^(JWT_SECRET_BASE64|GEMINI_API_KEY)=" "$file" > "$temporary"
+printf "JWT_SECRET_BASE64=%s\nGEMINI_API_KEY=%s\n" "$jwt_secret" "$gemini_secret" >> "$temporary"
 chmod 600 "$temporary"
 chown 0:0 "$temporary"
 mv -T "$temporary" "$file"
 trap - EXIT
-printf "RUNTIME_JWT_UPDATED\n"
+printf "RUNTIME_SECRETS_UPDATED\n"
 '
 }
 cleanup_old_app_images() {
@@ -145,6 +150,8 @@ deploy_main() {
     [[ $# == 1 && $1 =~ ^[0-9a-f]{40}$ ]] || die INVALID_SHA
     IFS= read -r jwt_secret_line || die MISSING_JWT_SECRET
     [[ $jwt_secret_line == JWT_SECRET_BASE64=* ]] || die INVALID_JWT_SECRET
+    IFS= read -r gemini_secret_line || die MISSING_GEMINI_API_KEY
+    [[ $gemini_secret_line == GEMINI_API_KEY=* ]] || die INVALID_GEMINI_API_KEY
     sha=$1
     root=/opt/danditon
     release="$root/releases/$sha"
@@ -176,8 +183,8 @@ deploy_main() {
         prior=$(jq -r '.directory' "$root/current.json")
         if [[ $(jq -r '.sha' "$root/current.json") == "$sha" ]]; then
             [[ $(jq -r '.manifest' "$root/current.json") == "$manifest" ]] || die RELEASE_COLLISION
-            update_runtime_jwt "$release" "$jwt_secret_line" || die RUNTIME_JWT_UPDATE_FAILED
-            unset jwt_secret_line
+            update_runtime_secrets "$release" "$jwt_secret_line" "$gemini_secret_line" || die RUNTIME_SECRETS_UPDATE_FAILED
+            unset jwt_secret_line gemini_secret_line
             compose "$release" up -d --no-deps app
             ready "$release" || die CURRENT_NOT_HEALTHY
             printf 'ALREADY_CURRENT\n'
@@ -213,8 +220,8 @@ deploy_main() {
     trap 'exit 130' INT
     trap 'exit 143' TERM
     activated=true
-    update_runtime_jwt "$release" "$jwt_secret_line" || die RUNTIME_JWT_UPDATE_FAILED
-    unset jwt_secret_line
+    update_runtime_secrets "$release" "$jwt_secret_line" "$gemini_secret_line" || die RUNTIME_SECRETS_UPDATE_FAILED
+    unset jwt_secret_line gemini_secret_line
     if [[ -z $prior ]]; then
         compose "$release" up -d --wait --wait-timeout 120 db
         healthy "$release" || die DATABASE_NOT_HEALTHY

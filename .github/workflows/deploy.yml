@@ -86,6 +86,7 @@ jobs:
           SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.EC2_SSH_KNOWN_HOSTS }}
           JWT_SECRET_BASE64: ${{ secrets.JWT_SECRET_BASE64 }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: bash ops/ci/deploy.sh
       - if: always()
         run: rm -rf -- "$RUNNER_TEMP/danditon-deploy"
