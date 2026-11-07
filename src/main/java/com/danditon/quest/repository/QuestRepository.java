@@ -11,4 +11,6 @@ public interface QuestRepository extends JpaRepository<Quest, Long> {
 
 	List<Quest> findByStatus(QuestStatus status);
 
+	List<Quest> findByAuthorIdOrderByCreatedAtDescIdDesc(Long authorId);
+
 }

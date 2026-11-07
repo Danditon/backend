@@ -43,8 +43,6 @@ class SecurityConfiguration {
 				.jwt(jwt -> jwt.jwtAuthenticationConverter(authentication)));
 		http.authorizeHttpRequests(requests -> requests
 			.requestMatchers(publicAuthPosts).permitAll()
-			.requestMatchers(HttpMethod.GET, "/swagger-ui.html", "/swagger-ui/**",
-				"/v3/api-docs", "/v3/api-docs.yaml", "/v3/api-docs/swagger-config").permitAll()
 			.requestMatchers(HttpMethod.GET, "/actuator/health/readiness").permitAll()
 			.requestMatchers(HttpMethod.GET, "/uploads/**").permitAll()
 			.requestMatchers(HttpMethod.HEAD, "/uploads/**").permitAll()

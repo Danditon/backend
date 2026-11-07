@@ -176,6 +176,14 @@ class SecurityIntegrationTests {
 		unauthorized(send(request("GET", "/v3/api-docs").header("Authorization", authorization)));
 	}
 
+	@ParameterizedTest
+	@ValueSource(strings = {"/swagger-ui.html", "/swagger-ui/index.html", "/v3/api-docs",
+		"/v3/api-docs.yaml", "/v3/api-docs/swagger-config"})
+	void swaggerAndOpenApiRoutesAreUnavailable(String path) throws Exception {
+		unauthorized(send(request("GET", path)));
+		assertEquals(404, send(request("GET", path).header("Authorization", "Bearer " + valid())).statusCode());
+	}
+
 	@Test
 	void basicCookiesQueryAndFormCannotAuthenticate() throws Exception {
 		unauthorized(send(request("GET", "/security/principal").header("Authorization", "Basic Zm9vOmJhcg==")));
