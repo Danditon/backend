@@ -30,6 +30,8 @@ def main() -> None:
     )
     assert deploy_step['env']['JWT_SECRET_BASE64'] == '${{ secrets.JWT_SECRET_BASE64 }}', \
         'JWT_PRODUCTION_SECRET_REQUIRED'
+    assert deploy_step['env']['GEMINI_API_KEY'] == '${{ secrets.GEMINI_API_KEY }}', \
+        'GEMINI_PRODUCTION_SECRET_REQUIRED'
     scripts = Path('ops/ci/deploy.sh').read_text(encoding='utf-8') + \
         Path('ops/deploy/deploy.sh').read_text(encoding='utf-8')
     assert 'jwt.env' not in scripts, 'NO_PER_RELEASE_JWT_FILE'

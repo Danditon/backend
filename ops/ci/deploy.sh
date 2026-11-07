@@ -12,6 +12,10 @@ decoded_size=$(printf '%s' "$JWT_SECRET_BASE64" | base64 --decode 2>/dev/null | 
 [[ $(printf '%s' "$JWT_SECRET_BASE64" | base64 --decode | base64 -w 0) == "$JWT_SECRET_BASE64" ]] || die INVALID_JWT_SECRET
 jwt_secret_line=JWT_SECRET_BASE64=$JWT_SECRET_BASE64
 unset JWT_SECRET_BASE64
+GEMINI_API_KEY=${GEMINI_API_KEY:-}
+[[ $GEMINI_API_KEY =~ ^[A-Za-z0-9_-]+$ ]] || die INVALID_GEMINI_API_KEY
+gemini_secret_line=GEMINI_API_KEY=$GEMINI_API_KEY
+unset GEMINI_API_KEY
 work=${RUNNER_TEMP:?}/danditon-deploy
 mkdir -m 700 "$work"
 cleanup() {
@@ -74,9 +78,9 @@ else
 fi
 REMOTE
 incoming_created=false
-printf '%s\n' "$jwt_secret_line" | timeout 780 ssh "${SSH_OPTS[@]}" "$target" \
+printf '%s\n' "$jwt_secret_line" "$gemini_secret_line" | timeout 780 ssh "${SSH_OPTS[@]}" "$target" \
     "bash /opt/danditon/releases/$SHA/deploy.sh $SHA"
-unset jwt_secret_line
+unset jwt_secret_line gemini_secret_line
 timeout 30 ssh "${SSH_OPTS[@]}" "$target" "bash -s -- '$SHA' '$IMAGE_DIGEST'" <<'REMOTE'
 set -Eeuo pipefail
 release=/opt/danditon/releases/$1

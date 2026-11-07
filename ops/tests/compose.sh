@@ -31,6 +31,7 @@ PROD_DB_USERNAME=fixture
 PROD_DB_PASSWORD=fixture-app-only
 MYSQL_ROOT_PASSWORD=fixture-root-only
 JWT_SECRET_BASE64=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+GEMINI_API_KEY=fixture-gemini-key
 EOF
 if [[ -n ${QA_APP_IMAGE:-} ]]; then
     printf 'APP_IMAGE=%s\n' "$QA_APP_IMAGE" >> "$fixture/env"
@@ -49,8 +50,10 @@ compose=(docker compose -p "$project" --env-file "$fixture/env" -f compose.prod.
 docker compose --env-file "$fixture/env" -f compose.prod.yaml config --quiet
 docker compose --env-file "$fixture/env" -f compose.prod.yaml config --format json |
     jq -e '.services.app.environment.JWT_SECRET_BASE64 != null and
-        (.services.db.environment | has("JWT_SECRET_BASE64") | not)' >/dev/null
-echo JWT_APP_ONLY_CONFIG_PASS
+        .services.app.environment.GEMINI_API_KEY != null and
+        (.services.db.environment | has("JWT_SECRET_BASE64") | not) and
+        (.services.db.environment | has("GEMINI_API_KEY") | not)' >/dev/null
+echo APP_SECRETS_CONFIG_PASS
 sed '/^MYSQL_ROOT_PASSWORD=/d' "$fixture/env" > "$fixture/missing-root-env"
 if env -u MYSQL_ROOT_PASSWORD docker compose --env-file "$fixture/missing-root-env" -f compose.prod.yaml config --quiet >"$fixture/missing-root-error" 2>&1; then exit 1; fi
 grep -q MYSQL_ROOT_PASSWORD "$fixture/missing-root-error"
@@ -59,6 +62,10 @@ sed '/^JWT_SECRET_BASE64=/d' "$fixture/env" > "$fixture/missing-jwt-env"
 if env -u JWT_SECRET_BASE64 docker compose --env-file "$fixture/missing-jwt-env" -f compose.prod.yaml config --quiet >"$fixture/missing-jwt-error" 2>&1; then exit 1; fi
 grep -q JWT_SECRET_BASE64 "$fixture/missing-jwt-error"
 echo MISSING_JWT_SECRET_REJECTED
+sed '/^GEMINI_API_KEY=/d' "$fixture/env" > "$fixture/missing-gemini-env"
+if env -u GEMINI_API_KEY docker compose --env-file "$fixture/missing-gemini-env" -f compose.prod.yaml config --quiet >"$fixture/missing-gemini-error" 2>&1; then exit 1; fi
+grep -q GEMINI_API_KEY "$fixture/missing-gemini-error"
+echo MISSING_GEMINI_API_KEY_REJECTED
 docker image inspect "${QA_APP_IMAGE:-danditon-task7-qa:local}" >/dev/null
 "${compose[@]}" up -d --wait --wait-timeout 180
 db=$("${compose[@]}" ps -q db)
@@ -79,8 +86,10 @@ ready
 [[ $(docker network inspect -f '{{.Internal}}' "${project}_backend") == true ]]
 docker exec "$app" sh -c 'test -z "${MYSQL_ROOT_PASSWORD:-}"'
 docker exec "$app" sh -c 'test -n "${JWT_SECRET_BASE64:-}"'
+docker exec "$app" sh -c 'test -n "${GEMINI_API_KEY:-}"'
 docker exec "$db" sh -c 'test -z "${JWT_SECRET_BASE64:-}"'
-echo JWT_APP_ONLY_RUNTIME_PASS
+docker exec "$db" sh -c 'test -z "${GEMINI_API_KEY:-}"'
+echo APP_SECRETS_RUNTIME_PASS
 [[ $(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/app/uploads"}}{{.Name}}{{end}}{{end}}' "$app") == "$uploads_volume" ]]
 docker exec "$app" sh -c '
     test "$(id -u):$(id -g)" = "10001:10001"

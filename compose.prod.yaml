@@ -10,6 +10,7 @@ services:
       PROD_DB_USERNAME: ${PROD_DB_USERNAME:?required}
       PROD_DB_PASSWORD: ${PROD_DB_PASSWORD:?required}
       JWT_SECRET_BASE64: ${JWT_SECRET_BASE64:?required}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:?required}
       JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=60
     ports:
       - "127.0.0.1:8080:8080"
