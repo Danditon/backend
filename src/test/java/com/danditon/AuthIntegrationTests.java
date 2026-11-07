@@ -83,6 +83,37 @@ class AuthIntegrationTests {
 		System.out.println("AUTH_PERSISTENCE row_found=true canonical_email=true bcrypt=true exact_password=true principal_decimal_id=true cookies=0");
 	}
 
+	@ParameterizedTest(name = "ignored auth bearer {index}")
+	@MethodSource("com.danditon.SecurityIntegrationTests#ignoredBearerTokens")
+	void authIgnoresBearerWhilePreservingValidationAndCredentials(String token) throws Exception {
+		String email = uniqueEmail();
+		String body = credentials(email, PASSWORD);
+		var created = authResponse(post("signup", body, token), 201);
+		var loggedIn = authResponse(post("login", body, token), 200);
+		assertEquals(created.get("userId"), loggedIn.get("userId"));
+		for (var issued : new JsonNode[]{created, loggedIn}) {
+			var principal = send(HttpRequest.newBuilder(uri("/security/principal"))
+				.header("Authorization", "Bearer " + issued.get("accessToken").asText()).GET());
+			assertEquals(200, principal.statusCode());
+			assertEquals(created.get("userId").asText(), principal.body());
+			assertNoCookie(principal);
+		}
+		assertError(post("signup", body, token), 409,
+			"{\"code\":\"DUPLICATE_EMAIL\",\"message\":\"이미 가입된 이메일이에요\"}");
+		assertError(post("login", credentials(email, "wrong-input"), token), 401, UNAUTHORIZED);
+		assertError(post("login", credentials(uniqueEmail(), PASSWORD), token), 401, UNAUTHORIZED);
+		for (String action : new String[]{"signup", "login"}) {
+			for (String invalid : new String[]{"", "{", "{}"}) {
+				assertError(post(action, invalid, token), 400, INVALID);
+			}
+		}
+		assertError(send(HttpRequest.newBuilder(uri("/security/principal"))
+			.header("Authorization", "Bearer " + token).GET()), 401, UNAUTHORIZED);
+		assertError(send(HttpRequest.newBuilder(uri("/security/principal")).GET()), 401, UNAUTHORIZED);
+		assertTrue(cookies.getCookieStore().getCookies().isEmpty());
+		System.out.println("AUTH_BEARER_PASS signup=201 login=200 issued_principals=200 duplicate=409 credentials=401 invalid=400 protected=401 cookies=0");
+	}
+
 	@Test
 	void duplicateAndBadCredentialsHaveExactGenericErrors() throws Exception {
 		String email = uniqueEmail();
@@ -177,6 +208,11 @@ class AuthIntegrationTests {
 	private HttpResponse<String> post(String endpoint, String body) throws Exception {
 		return send(HttpRequest.newBuilder(uri("/api/auth/" + endpoint)).header("Content-Type", "application/json")
 			.POST(HttpRequest.BodyPublishers.ofString(body)));
+	}
+
+	private HttpResponse<String> post(String endpoint, String body, String token) throws Exception {
+		return send(HttpRequest.newBuilder(uri("/api/auth/" + endpoint)).header("Content-Type", "application/json")
+			.header("Authorization", "Bearer " + token).POST(HttpRequest.BodyPublishers.ofString(body)));
 	}
 
 	private HttpResponse<String> send(HttpRequest.Builder request) throws Exception {

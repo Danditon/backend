@@ -146,7 +146,34 @@ class SecurityIntegrationTests {
 		for (String suffix : new String[]{"/", "/extra"}) {
 			unauthorized(send(request("POST", path + suffix)));
 		}
-		unauthorized(send(request("POST", path).header("Authorization", "Bearer malformed")));
+		assertEquals(400, send(request("POST", path).header("Authorization", "Bearer malformed")).statusCode());
+	}
+
+	static Stream<String> ignoredBearerTokens() throws Exception {
+		return Stream.of("malformed", "invalid token!",
+			token("\"test-subject\"", Instant.now().getEpochSecond() - 600, null));
+	}
+
+	@ParameterizedTest(name = "exact bearer boundary {index}")
+	@MethodSource("ignoredBearerTokens")
+	void ignoredAuthBearerStillRejectedOutsideExactPost(String token) throws Exception {
+		String authorization = "Bearer " + token;
+		for (String path : new String[]{"/api/auth/signup", "/api/auth/login"}) {
+			assertEquals(401, send(request("HEAD", path).header("Authorization", authorization)).statusCode());
+			for (String method : new String[]{"GET", "PUT", "PATCH", "DELETE", "OPTIONS"}) {
+				unauthorized(send(request(method, path).header("Authorization", authorization)));
+			}
+			for (String suffix : new String[]{"/", "/extra"}) {
+				unauthorized(send(request("POST", path + suffix).header("Authorization", authorization)));
+			}
+			var preflight = send(request("OPTIONS", path).header("Origin", "https://one.example")
+				.header("Access-Control-Request-Method", "POST")
+				.header("Access-Control-Request-Headers", "Authorization,Content-Type"));
+			assertEquals(200, preflight.statusCode());
+			assertCors(preflight);
+		}
+		unauthorized(send(request("GET", "/security/principal").header("Authorization", authorization)));
+		unauthorized(send(request("GET", "/v3/api-docs").header("Authorization", authorization)));
 	}
 
 	@ParameterizedTest
