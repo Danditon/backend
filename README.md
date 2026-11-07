@@ -48,7 +48,7 @@
 
 ## 인증 API (구현됨)
 
-두 API는 `Content-Type: application/json`으로 요청하며, 인증 헤더 없이 호출할 수 있습니다. 다만 잘못된 Bearer 토큰이나 형식이 잘못된 Bearer `Authorization` 헤더를 함께 보내면 공개 인증 API에서도 `401 UNAUTHORIZED`로 거부됩니다.
+두 API는 `Content-Type: application/json`으로 요청하며, 인증 헤더 없이 호출할 수 있습니다. 정확한 `POST /api/auth/signup`과 `POST /api/auth/login` 요청에서만 함께 보낸 Bearer 토큰과 Bearer `Authorization` 헤더를 무시하므로, 잘못되거나 만료된 JWT 또는 형식이 잘못된 Bearer 헤더도 검증하지 않습니다.
 
 ### 회원가입
 
@@ -103,7 +103,7 @@
 | 필수값 누락, 형식·길이 위반, 잘못된 JSON | `400 INVALID_INPUT` | 입력값이 올바르지 않아요 |
 | 가입된 이메일로 회원가입 | `409 DUPLICATE_EMAIL` | 이미 가입된 이메일이에요 |
 | 로그인 비밀번호 불일치 또는 미가입 이메일 | `401 UNAUTHORIZED` | 로그인이 필요해요 |
-| 잘못된 Bearer 토큰·Bearer 헤더 | `401 UNAUTHORIZED` | 로그인이 필요해요 |
+| 정확한 `POST /api/auth/signup`·`POST /api/auth/login` 요청 외의 잘못된 Bearer 토큰·Bearer 헤더 | `401 UNAUTHORIZED` | 로그인이 필요해요 |
 | 지원하지 않는 요청 Content-Type | `415 INVALID_INPUT` | 입력값이 올바르지 않아요 |
 | 예상하지 못한 서버 오류 | `500 INTERNAL_ERROR` | 서버 오류가 발생했어요 |
 
@@ -119,7 +119,7 @@
 
 생성된 문서는 현재 구현된 회원가입·로그인 계약을 제공합니다. 위 전체 API 설계 목록과 구현 범위가 다릅니다. 문서와 UI 리소스에 대한 GET 허용은 다른 비즈니스 API의 인증을 해제하지 않습니다.
 
-Swagger UI에서 회원가입 또는 로그인 응답의 `accessToken`을 복사해 **Authorize**에 토큰 문자열만 입력하세요. `Bearer ` 접두사는 UI가 붙입니다. 회원가입·로그인 자체에는 인증이 필요 없으며, 잘못된 Bearer 헤더를 직접 보내면 공개 경로라도 거부됩니다.
+Swagger UI에서 회원가입 또는 로그인 응답의 `accessToken`을 복사해 **Authorize**에 토큰 문자열만 입력하세요. `Bearer ` 접두사는 UI가 붙입니다. 정확한 `POST /api/auth/signup`과 `POST /api/auth/login` 요청에는 인증이 필요 없으며, 이 두 요청에서만 함께 보낸 Bearer 토큰·헤더를 무시합니다.
 
 문서 경로 확인용 명령(Windows에서는 `curl` 대신 `curl.exe` 사용 가능):
 
