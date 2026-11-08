@@ -36,7 +36,11 @@ case "$1" in
     run)
         IFS= read -r jwt_secret_line
         IFS= read -r gemini_secret_line
-        printf '%s\n' "$jwt_secret_line" "$gemini_secret_line" > "$FIXTURE/runtime-secret"
+        IFS= read -r storage_base_url_line
+        IFS= read -r embed_host_line
+        IFS= read -r similarity_threshold_line
+        printf '%s\n' "$jwt_secret_line" "$gemini_secret_line" "$storage_base_url_line" \
+            "$embed_host_line" "$similarity_threshold_line" > "$FIXTURE/runtime-secret"
         printf 'RUNTIME_SECRETS_UPDATED\n' ;;
     pull)
         tag=${2##*:}
@@ -127,8 +131,14 @@ c=$(printf 'c%.0s' {1..40})
 digest="sha256:$(printf 'd%.0s' {1..64})"
 default_jwt_secret_line="JWT_SECRET_BASE64=$(printf '0123456789abcdef0123456789abcdef' | base64 -w 0)"
 default_gemini_secret_line=GEMINI_API_KEY=fixture-gemini-key
+default_storage_base_url_line=DANDITON_STORAGE_BASE_URL=https://api.example.test
+default_embed_host_line=EMBED_HOST=http://embed.example.test:8000
+default_similarity_threshold_line=EMBEDDING_SIMILARITY_THRESHOLD=0.75
 jwt_secret_line=$default_jwt_secret_line
 gemini_secret_line=$default_gemini_secret_line
+storage_base_url_line=$default_storage_base_url_line
+embed_host_line=$default_embed_host_line
+similarity_threshold_line=$default_similarity_threshold_line
 printf '%s\n' "$digest" > "$work/digest"
 setup() {
     local case_name=$1 sha
@@ -139,6 +149,9 @@ setup() {
     /bin/rm -f "$work/runtime-secret"
     jwt_secret_line=$default_jwt_secret_line
     gemini_secret_line=$default_gemini_secret_line
+    storage_base_url_line=$default_storage_base_url_line
+    embed_host_line=$default_embed_host_line
+    similarity_threshold_line=$default_similarity_threshold_line
     /bin/rm -f "$work/fail-image-cleanup"
     : > "$work/docker.log"
     : > "$work/removed"
@@ -153,7 +166,10 @@ setup() {
     done
     printf '%s\n' "$a" > "$work/head"
 }
-deploy() { printf '%s\n' "$jwt_secret_line" "$gemini_secret_line" | bash "$root/releases/$1/deploy.sh" "$1"; }
+deploy() {
+    printf '%s\n' "$jwt_secret_line" "$gemini_secret_line" "$storage_base_url_line" \
+        "$embed_host_line" "$similarity_threshold_line" | bash "$root/releases/$1/deploy.sh" "$1"
+}
 fails() {
     local label=$1 expected
     shift
@@ -192,6 +208,9 @@ jwt_secret_line="JWT_SECRET_BASE64=$(printf 'fedcba9876543210fedcba9876543210' |
 deploy "$b" | grep -q ALREADY_CURRENT
 grep -Fxq "$jwt_secret_line" "$work/runtime-secret"
 grep -Fxq "$gemini_secret_line" "$work/runtime-secret"
+grep -Fxq "$storage_base_url_line" "$work/runtime-secret"
+grep -Fxq "$embed_host_line" "$work/runtime-secret"
+grep -Fxq "$similarity_threshold_line" "$work/runtime-secret"
 printf 'PASS: A->B, metadata, database untouched, retained current/previous, removed old SHA image, ignored non-SHA tag, idempotent retry and secret rotation\n'
 setup cleanup_warning
 touch "$work/fail-image-cleanup"

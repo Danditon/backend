@@ -43,6 +43,12 @@ valid_jwt=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
 export JWT_SECRET_BASE64=$valid_jwt
 valid_gemini=fixture-gemini-key
 export GEMINI_API_KEY=$valid_gemini
+valid_storage_base_url=https://api.example.test
+export DANDITON_STORAGE_BASE_URL=$valid_storage_base_url
+valid_embed_host=http://embed.example.test:8000
+export EMBED_HOST=$valid_embed_host
+valid_similarity_threshold=0.75
+export EMBEDDING_SIMILARITY_THRESHOLD=$valid_similarity_threshold
 export EC2_HOST=127.0.0.1 RUNNER_TEMP="$work/runner" GITHUB_RUN_ID=123 GITHUB_RUN_ATTEMPT=1
 export SSH_PRIVATE_KEY SSH_KNOWN_HOSTS
 SSH_PRIVATE_KEY=$(cat "$work/key")
@@ -90,7 +96,14 @@ IFS= read -r runtime_secret_line
 [[ $runtime_secret_line == JWT_SECRET_BASE64=* ]]
 IFS= read -r gemini_secret_line
 [[ $gemini_secret_line == GEMINI_API_KEY=* ]]
-printf '%s\n' "$runtime_secret_line" "$gemini_secret_line" > /opt/danditon/runtime-secret
+IFS= read -r storage_base_url_line
+[[ $storage_base_url_line == DANDITON_STORAGE_BASE_URL=* ]]
+IFS= read -r embed_host_line
+[[ $embed_host_line == EMBED_HOST=* ]]
+IFS= read -r similarity_threshold_line
+[[ $similarity_threshold_line == EMBEDDING_SIMILARITY_THRESHOLD=* ]]
+printf '%s\n' "$runtime_secret_line" "$gemini_secret_line" "$storage_base_url_line" \
+    "$embed_host_line" "$similarity_threshold_line" > /opt/danditon/runtime-secret
 digest=$(cat "/opt/danditon/releases/$1/image-digest.txt")
 printf '{"image":"ghcr.io/danditon/backend:%s@%s"}\n' "$1" "$digest" > /opt/danditon/current.json
 printf 'APP_IMAGE=ghcr.io/danditon/backend:%s@%s\n' "$1" "$digest" > "/opt/danditon/releases/$1/image.env"
@@ -100,15 +113,24 @@ for _attempt in {1..30}; do
     if timeout 3 /usr/bin/ssh -p "$port" -i "$work/key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null danditon-deploy@127.0.0.1 true 2>/dev/null; then break; fi
     sleep 1
 done
-for scenario in invalid missing-jwt malformed-jwt missing-gemini malformed-gemini wrong-key private stale partial digest remote running old-health-path happy; do
+for scenario in invalid missing-jwt malformed-jwt missing-gemini malformed-gemini \
+    missing-storage malformed-storage missing-embed malformed-embed missing-threshold malformed-threshold \
+    wrong-key private stale partial digest remote running old-health-path happy; do
     export SCENARIO=$scenario
     docker exec "$name" bash -c 'rm -rf /opt/danditon/releases/* /opt/danditon/releases/.incoming-* /opt/danditon/current.json /opt/danditon/runtime-secret /opt/danditon/remote-failure /opt/danditon/wrong-running'
     test_sha=$SHA test_hosts=$SSH_KNOWN_HOSTS test_jwt=$valid_jwt test_gemini=$valid_gemini
+    test_storage=$valid_storage_base_url test_embed=$valid_embed_host test_threshold=$valid_similarity_threshold
     [[ $scenario != invalid ]] || test_sha='bad;injection'
     [[ $scenario != missing-jwt ]] || test_jwt=''
     [[ $scenario != malformed-jwt ]] || test_jwt='not-base64!'
     [[ $scenario != missing-gemini ]] || test_gemini=''
     [[ $scenario != malformed-gemini ]] || test_gemini='not valid!'
+    [[ $scenario != missing-storage ]] || test_storage=''
+    [[ $scenario != malformed-storage ]] || test_storage='ftp://storage.example.test'
+    [[ $scenario != missing-embed ]] || test_embed=''
+    [[ $scenario != malformed-embed ]] || test_embed='not-a-url'
+    [[ $scenario != missing-threshold ]] || test_threshold=''
+    [[ $scenario != malformed-threshold ]] || test_threshold='1.1'
     [[ $scenario != wrong-key ]] || test_hosts="[127.0.0.1]:$port $(cut -d' ' -f1-2 "$work/key.pub")"
     [[ $scenario != remote ]] || docker exec "$name" touch /opt/danditon/remote-failure
     [[ $scenario != running ]] || docker exec "$name" touch /opt/danditon/wrong-running
@@ -120,7 +142,9 @@ for scenario in invalid missing-jwt malformed-jwt missing-gemini malformed-gemin
     # When executing the production runner script through native SSH and SCP.
     set +e
     (cd "$work/source" && PATH="$work/bin:$PATH" SHA="$test_sha" SSH_KNOWN_HOSTS="$test_hosts" \
-        JWT_SECRET_BASE64="$test_jwt" GEMINI_API_KEY="$test_gemini" bash "$runner_script") > "$work/$scenario.log" 2>&1
+        JWT_SECRET_BASE64="$test_jwt" GEMINI_API_KEY="$test_gemini" \
+        DANDITON_STORAGE_BASE_URL="$test_storage" EMBED_HOST="$test_embed" \
+        EMBEDDING_SIMILARITY_THRESHOLD="$test_threshold" bash "$runner_script") > "$work/$scenario.log" 2>&1
     code=$?
     set -e
     # Then errors are red, before inappropriate mutation, and secrets are removed.
@@ -131,6 +155,9 @@ for scenario in invalid missing-jwt malformed-jwt missing-gemini malformed-gemin
             grep -q DEPLOY_VERIFIED "$work/$scenario.log"
             docker exec "$name" grep -Fxq "JWT_SECRET_BASE64=$valid_jwt" /opt/danditon/runtime-secret
             docker exec "$name" grep -Fxq "GEMINI_API_KEY=$valid_gemini" /opt/danditon/runtime-secret
+            docker exec "$name" grep -Fxq "DANDITON_STORAGE_BASE_URL=$valid_storage_base_url" /opt/danditon/runtime-secret
+            docker exec "$name" grep -Fxq "EMBED_HOST=$valid_embed_host" /opt/danditon/runtime-secret
+            docker exec "$name" grep -Fxq "EMBEDDING_SIMILARITY_THRESHOLD=$valid_similarity_threshold" /opt/danditon/runtime-secret
             docker exec "$name" test ! -e "/opt/danditon/releases/$SHA/jwt.env" ;;
         remote) [[ $code == 37 ]] ;;
         partial) [[ $code == 23 ]]; docker exec "$name" test ! -e "/opt/danditon/releases/$SHA" ;;
@@ -141,6 +168,9 @@ for scenario in invalid missing-jwt malformed-jwt missing-gemini malformed-gemin
     [[ $scenario != private ]] || grep -q GHCR_NOT_PUBLIC "$work/$scenario.log"
     if grep -Fq "$valid_jwt" "$work/$scenario.log"; then exit 1; fi
     if grep -Fq "$valid_gemini" "$work/$scenario.log"; then exit 1; fi
+    if grep -Fq "$valid_storage_base_url" "$work/$scenario.log"; then exit 1; fi
+    if grep -Fq "$valid_embed_host" "$work/$scenario.log"; then exit 1; fi
+    if grep -Fq "$valid_similarity_threshold" "$work/$scenario.log"; then exit 1; fi
     if [[ -n ${EVIDENCE_DIR:-} ]]; then
         printf 'scenario=%s exit=%s runner_credentials_removed=true\n' "$scenario" "$code" >> "$work/$scenario.log"
         cp "$work/$scenario.log" "$EVIDENCE_DIR/task-10-ssh-ghcr-$scenario.log"
