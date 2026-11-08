@@ -16,6 +16,18 @@ GEMINI_API_KEY=${GEMINI_API_KEY:-}
 [[ $GEMINI_API_KEY =~ ^[A-Za-z0-9._-]+$ ]] || die INVALID_GEMINI_API_KEY
 gemini_secret_line=GEMINI_API_KEY=$GEMINI_API_KEY
 unset GEMINI_API_KEY
+DANDITON_STORAGE_BASE_URL=${DANDITON_STORAGE_BASE_URL:-}
+[[ $DANDITON_STORAGE_BASE_URL =~ ^https?://[A-Za-z0-9._~:/-]+$ ]] || die INVALID_DANDITON_STORAGE_BASE_URL
+storage_base_url_line=DANDITON_STORAGE_BASE_URL=$DANDITON_STORAGE_BASE_URL
+unset DANDITON_STORAGE_BASE_URL
+EMBED_HOST=${EMBED_HOST:-}
+[[ $EMBED_HOST =~ ^https?://[A-Za-z0-9._~:/-]+$ ]] || die INVALID_EMBED_HOST
+embed_host_line=EMBED_HOST=$EMBED_HOST
+unset EMBED_HOST
+EMBEDDING_SIMILARITY_THRESHOLD=${EMBEDDING_SIMILARITY_THRESHOLD:-}
+[[ $EMBEDDING_SIMILARITY_THRESHOLD =~ ^(0(\.[0-9]+)?|1(\.0+)?)$ ]] || die INVALID_EMBEDDING_SIMILARITY_THRESHOLD
+similarity_threshold_line=EMBEDDING_SIMILARITY_THRESHOLD=$EMBEDDING_SIMILARITY_THRESHOLD
+unset EMBEDDING_SIMILARITY_THRESHOLD
 work=${RUNNER_TEMP:?}/danditon-deploy
 mkdir -m 700 "$work"
 cleanup() {
@@ -78,9 +90,10 @@ else
 fi
 REMOTE
 incoming_created=false
-printf '%s\n' "$jwt_secret_line" "$gemini_secret_line" | timeout 780 ssh "${SSH_OPTS[@]}" "$target" \
+printf '%s\n' "$jwt_secret_line" "$gemini_secret_line" "$storage_base_url_line" \
+    "$embed_host_line" "$similarity_threshold_line" | timeout 780 ssh "${SSH_OPTS[@]}" "$target" \
     "bash /opt/danditon/releases/$SHA/deploy.sh $SHA"
-unset jwt_secret_line gemini_secret_line
+unset jwt_secret_line gemini_secret_line storage_base_url_line embed_host_line similarity_threshold_line
 timeout 30 ssh "${SSH_OPTS[@]}" "$target" "bash -s -- '$SHA' '$IMAGE_DIGEST'" <<'REMOTE'
 set -Eeuo pipefail
 release=/opt/danditon/releases/$1

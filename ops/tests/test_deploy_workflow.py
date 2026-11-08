@@ -32,6 +32,12 @@ def main() -> None:
         'JWT_PRODUCTION_SECRET_REQUIRED'
     assert deploy_step['env']['GEMINI_API_KEY'] == '${{ secrets.GEMINI_API_KEY }}', \
         'GEMINI_PRODUCTION_SECRET_REQUIRED'
+    assert deploy_step['env']['DANDITON_STORAGE_BASE_URL'] == \
+        '${{ secrets.DANDITON_STORAGE_BASE_URL }}', 'STORAGE_BASE_URL_SECRET_REQUIRED'
+    assert deploy_step['env']['EMBED_HOST'] == '${{ secrets.EMBED_HOST }}', \
+        'EMBED_HOST_SECRET_REQUIRED'
+    assert deploy_step['env']['EMBEDDING_SIMILARITY_THRESHOLD'] == \
+        '${{ secrets.EMBEDDING_SIMILARITY_THRESHOLD }}', 'SIMILARITY_THRESHOLD_SECRET_REQUIRED'
     scripts = Path('ops/ci/deploy.sh').read_text(encoding='utf-8') + \
         Path('ops/deploy/deploy.sh').read_text(encoding='utf-8')
     assert 'jwt.env' not in scripts, 'NO_PER_RELEASE_JWT_FILE'

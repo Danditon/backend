@@ -87,6 +87,9 @@ jobs:
           SSH_KNOWN_HOSTS: ${{ secrets.EC2_SSH_KNOWN_HOSTS }}
           JWT_SECRET_BASE64: ${{ secrets.JWT_SECRET_BASE64 }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DANDITON_STORAGE_BASE_URL: ${{ secrets.DANDITON_STORAGE_BASE_URL }}
+          EMBED_HOST: ${{ secrets.EMBED_HOST }}
+          EMBEDDING_SIMILARITY_THRESHOLD: ${{ secrets.EMBEDDING_SIMILARITY_THRESHOLD }}
         run: bash ops/ci/deploy.sh
       - if: always()
         run: rm -rf -- "$RUNNER_TEMP/danditon-deploy"

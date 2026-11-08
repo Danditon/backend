@@ -40,10 +40,12 @@ validate_record() {
     [[ $(cat "$directory/image.env") == "APP_IMAGE=$(jq -r '.image' "$record")" ]]
 }
 update_runtime_secrets() {
-    local directory=$1 jwt_secret_line=$2 gemini_secret_line=$3 runtime_image
+    local directory=$1 jwt_secret_line=$2 gemini_secret_line=$3 storage_base_url_line=$4
+    local embed_host_line=$5 similarity_threshold_line=$6 runtime_image
     runtime_image=$(cut -d= -f2- "$directory/image.env")
     [[ $runtime_image =~ ^ghcr\.io/danditon/backend:[0-9a-f]{40}@sha256:[0-9a-f]{64}$ ]] || return 1
-    printf '%s\n' "$jwt_secret_line" "$gemini_secret_line" | docker_cmd run --rm --interactive --network none \
+    printf '%s\n' "$jwt_secret_line" "$gemini_secret_line" "$storage_base_url_line" \
+        "$embed_host_line" "$similarity_threshold_line" | docker_cmd run --rm --interactive --network none \
         --read-only --user 0:0 --cap-drop ALL --security-opt no-new-privileges \
         --mount type=bind,src=/etc/danditon,dst=/runtime \
         --entrypoint /bin/bash "$runtime_image" -c '
@@ -51,12 +53,24 @@ set -Eeuo pipefail
 umask 077
 IFS= read -r jwt_secret_line
 IFS= read -r gemini_secret_line
+IFS= read -r storage_base_url_line
+IFS= read -r embed_host_line
+IFS= read -r similarity_threshold_line
 [[ $jwt_secret_line == JWT_SECRET_BASE64=* ]]
 [[ $gemini_secret_line == GEMINI_API_KEY=* ]]
+[[ $storage_base_url_line == DANDITON_STORAGE_BASE_URL=* ]]
+[[ $embed_host_line == EMBED_HOST=* ]]
+[[ $similarity_threshold_line == EMBEDDING_SIMILARITY_THRESHOLD=* ]]
 jwt_secret=${jwt_secret_line#JWT_SECRET_BASE64=}
 gemini_secret=${gemini_secret_line#GEMINI_API_KEY=}
+storage_base_url=${storage_base_url_line#DANDITON_STORAGE_BASE_URL=}
+embed_host=${embed_host_line#EMBED_HOST=}
+similarity_threshold=${similarity_threshold_line#EMBEDDING_SIMILARITY_THRESHOLD=}
 [[ $jwt_secret =~ ^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$ ]]
 [[ $gemini_secret =~ ^[A-Za-z0-9._-]+$ ]]
+[[ $storage_base_url =~ ^https?://[A-Za-z0-9._~:/-]+$ ]]
+[[ $embed_host =~ ^https?://[A-Za-z0-9._~:/-]+$ ]]
+[[ $similarity_threshold =~ ^(0(\.[0-9]+)?|1(\.0+)?)$ ]]
 decoded_size=$(printf "%s" "$jwt_secret" | base64 --decode 2>/dev/null | wc -c)
 [[ $decoded_size -ge 32 ]]
 [[ $(printf "%s" "$jwt_secret" | base64 --decode | base64 -w 0) == "$jwt_secret" ]]
@@ -70,10 +84,14 @@ for key in MYSQL_ROOT_PASSWORD PROD_DB_PASSWORD PROD_DB_USERNAME PROD_DB_URL; do
 done
 [[ $(grep -c "^JWT_SECRET_BASE64=" "$file" || true) -le 1 ]]
 [[ $(grep -c "^GEMINI_API_KEY=" "$file" || true) -le 1 ]]
+[[ $(grep -c "^DANDITON_STORAGE_BASE_URL=" "$file" || true) -le 1 ]]
+[[ $(grep -c "^EMBED_HOST=" "$file" || true) -le 1 ]]
+[[ $(grep -c "^EMBEDDING_SIMILARITY_THRESHOLD=" "$file" || true) -le 1 ]]
 temporary=$(mktemp /runtime/.env.XXXXXX)
 trap "rm -f -- \"$temporary\"" EXIT
-grep -Ev "^(JWT_SECRET_BASE64|GEMINI_API_KEY)=" "$file" > "$temporary"
-printf "JWT_SECRET_BASE64=%s\nGEMINI_API_KEY=%s\n" "$jwt_secret" "$gemini_secret" >> "$temporary"
+grep -Ev "^(JWT_SECRET_BASE64|GEMINI_API_KEY|DANDITON_STORAGE_BASE_URL|EMBED_HOST|EMBEDDING_SIMILARITY_THRESHOLD)=" "$file" > "$temporary"
+printf "JWT_SECRET_BASE64=%s\nGEMINI_API_KEY=%s\nDANDITON_STORAGE_BASE_URL=%s\nEMBED_HOST=%s\nEMBEDDING_SIMILARITY_THRESHOLD=%s\n" \
+    "$jwt_secret" "$gemini_secret" "$storage_base_url" "$embed_host" "$similarity_threshold" >> "$temporary"
 chmod 600 "$temporary"
 chown 0:0 "$temporary"
 mv -T "$temporary" "$file"
@@ -152,6 +170,12 @@ deploy_main() {
     [[ $jwt_secret_line == JWT_SECRET_BASE64=* ]] || die INVALID_JWT_SECRET
     IFS= read -r gemini_secret_line || die MISSING_GEMINI_API_KEY
     [[ $gemini_secret_line == GEMINI_API_KEY=* ]] || die INVALID_GEMINI_API_KEY
+    IFS= read -r storage_base_url_line || die MISSING_DANDITON_STORAGE_BASE_URL
+    [[ $storage_base_url_line == DANDITON_STORAGE_BASE_URL=* ]] || die INVALID_DANDITON_STORAGE_BASE_URL
+    IFS= read -r embed_host_line || die MISSING_EMBED_HOST
+    [[ $embed_host_line == EMBED_HOST=* ]] || die INVALID_EMBED_HOST
+    IFS= read -r similarity_threshold_line || die MISSING_EMBEDDING_SIMILARITY_THRESHOLD
+    [[ $similarity_threshold_line == EMBEDDING_SIMILARITY_THRESHOLD=* ]] || die INVALID_EMBEDDING_SIMILARITY_THRESHOLD
     sha=$1
     root=/opt/danditon
     release="$root/releases/$sha"
@@ -183,8 +207,9 @@ deploy_main() {
         prior=$(jq -r '.directory' "$root/current.json")
         if [[ $(jq -r '.sha' "$root/current.json") == "$sha" ]]; then
             [[ $(jq -r '.manifest' "$root/current.json") == "$manifest" ]] || die RELEASE_COLLISION
-            update_runtime_secrets "$release" "$jwt_secret_line" "$gemini_secret_line" || die RUNTIME_SECRETS_UPDATE_FAILED
-            unset jwt_secret_line gemini_secret_line
+            update_runtime_secrets "$release" "$jwt_secret_line" "$gemini_secret_line" \
+                "$storage_base_url_line" "$embed_host_line" "$similarity_threshold_line" || die RUNTIME_SECRETS_UPDATE_FAILED
+            unset jwt_secret_line gemini_secret_line storage_base_url_line embed_host_line similarity_threshold_line
             compose "$release" up -d --no-deps app
             ready "$release" || die CURRENT_NOT_HEALTHY
             printf 'ALREADY_CURRENT\n'
@@ -220,8 +245,9 @@ deploy_main() {
     trap 'exit 130' INT
     trap 'exit 143' TERM
     activated=true
-    update_runtime_secrets "$release" "$jwt_secret_line" "$gemini_secret_line" || die RUNTIME_SECRETS_UPDATE_FAILED
-    unset jwt_secret_line gemini_secret_line
+    update_runtime_secrets "$release" "$jwt_secret_line" "$gemini_secret_line" \
+        "$storage_base_url_line" "$embed_host_line" "$similarity_threshold_line" || die RUNTIME_SECRETS_UPDATE_FAILED
+    unset jwt_secret_line gemini_secret_line storage_base_url_line embed_host_line similarity_threshold_line
     if [[ -z $prior ]]; then
         compose "$release" up -d --wait --wait-timeout 120 db
         healthy "$release" || die DATABASE_NOT_HEALTHY
