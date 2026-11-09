@@ -55,7 +55,6 @@ class UploadsIntegrationTests {
 		"webp", new byte[]{'R', 'I', 'F', 'F', 1, 2, 3, 4, 'W', 'E', 'B', 'P'});
 	private static final String SENTINEL = "PRIVATE-UPLOAD-SENTINEL";
 	private static final String UNAUTHORIZED = "{\"code\":\"UNAUTHORIZED\",\"message\":\"로그인이 필요해요\"}";
-	private static final String ALLOWED_ORIGIN = "https://marshrnello.cloud";
 	private static final Map<String, String> ERROR_DISPATCHES = new ConcurrentHashMap<>();
 	@TempDir static Path temporary;
 	@LocalServerPort private int port;
@@ -145,13 +144,13 @@ class UploadsIntegrationTests {
 
 	@ParameterizedTest
 	@ValueSource(strings = {"GET", "HEAD"})
-	void publicReadsAndPreflightAllowConfiguredOrigin(String method) throws Exception {
+	void publicReadsAndPreflightKeepWildcardCors(String method) throws Exception {
 		for (String category : new String[]{"quest", "submission"}) {
 			String path = "/uploads/" + category + "/image.png";
-			var response = send(request(method, path).header("Origin", ALLOWED_ORIGIN));
+			var response = send(request(method, path).header("Origin", "https://client.example"));
 			assertEquals(200, response.statusCode());
 			assertCors(response);
-			var preflight = send(request("OPTIONS", path).header("Origin", ALLOWED_ORIGIN)
+			var preflight = send(request("OPTIONS", path).header("Origin", "https://client.example")
 				.header("Access-Control-Request-Method", method)
 				.header("Access-Control-Request-Headers", "Authorization,Content-Type"));
 			assertEquals(200, preflight.statusCode());
@@ -187,7 +186,7 @@ class UploadsIntegrationTests {
 	}
 
 	private void assertCors(HttpResponse<byte[]> response) {
-		assertEquals(ALLOWED_ORIGIN, response.headers().firstValue("access-control-allow-origin").orElseThrow());
+		assertEquals("*", response.headers().firstValue("access-control-allow-origin").orElseThrow());
 		assertTrue(response.headers().firstValue("access-control-allow-credentials").isEmpty());
 	}
 
