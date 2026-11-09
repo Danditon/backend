@@ -55,6 +55,7 @@ class SecurityIntegrationTests {
 	private static final JsonMapper JSON = JsonMapper.builder().build();
 	private static final Path EVIDENCE = Path.of(".omo/evidence/jwt-cors-security");
 	private static final String UNAUTHORIZED = "{\"code\":\"UNAUTHORIZED\",\"message\":\"로그인이 필요해요\"}";
+	private static final String ALLOWED_ORIGIN = "https://marshrnello.cloud";
 	@LocalServerPort private int port;
 	private final HttpClient client = HttpClient.newBuilder().cookieHandler(new CookieManager())
 		.connectTimeout(Duration.ofSeconds(5)).build();
@@ -166,7 +167,7 @@ class SecurityIntegrationTests {
 			for (String suffix : new String[]{"/", "/extra"}) {
 				unauthorized(send(request("POST", path + suffix).header("Authorization", authorization)));
 			}
-			var preflight = send(request("OPTIONS", path).header("Origin", "https://one.example")
+			var preflight = send(request("OPTIONS", path).header("Origin", ALLOWED_ORIGIN)
 				.header("Access-Control-Request-Method", "POST")
 				.header("Access-Control-Request-Headers", "Authorization,Content-Type"));
 			assertEquals(200, preflight.statusCode());
@@ -196,11 +197,10 @@ class SecurityIntegrationTests {
 			.POST(HttpRequest.BodyPublishers.ofString("username=user&password=fixture"))));
 	}
 
-	@ParameterizedTest
-	@ValueSource(strings = {"https://one.example", "https://two.example"})
-	void corsAllowsBearerRequestsFromAnyOriginWithoutCredentials(String origin) throws Exception {
+	@Test
+	void corsAllowsBearerRequestsFromConfiguredOriginWithoutCredentials() throws Exception {
 		for (String method : new String[]{"POST", "PATCH"}) {
-			var response = send(request("OPTIONS", "/security/principal").header("Origin", origin)
+			var response = send(request("OPTIONS", "/security/principal").header("Origin", ALLOWED_ORIGIN)
 				.header("Access-Control-Request-Method", method)
 				.header("Access-Control-Request-Headers", "Authorization,Content-Type"));
 			assertEquals(200, response.statusCode());
@@ -208,17 +208,26 @@ class SecurityIntegrationTests {
 			assertEquals("GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS", response.headers().firstValue("access-control-allow-methods").orElseThrow());
 			assertEquals("Authorization, Content-Type", response.headers().firstValue("access-control-allow-headers").orElseThrow());
 		}
-		var accepted = send(request("GET", "/security/principal").header("Origin", origin).header("Authorization", "Bearer " + valid()));
+		var accepted = send(request("GET", "/security/principal").header("Origin", ALLOWED_ORIGIN).header("Authorization", "Bearer " + valid()));
 		assertEquals(200, accepted.statusCode());
 		assertCors(accepted);
-		var rejected = send(request("GET", "/security/principal").header("Origin", origin));
+		var rejected = send(request("GET", "/security/principal").header("Origin", ALLOWED_ORIGIN));
 		unauthorized(rejected);
 		assertCors(rejected);
 	}
 
 	@Test
+	void corsRejectsPreflightFromUnconfiguredOrigin() throws Exception {
+		var response = send(request("OPTIONS", "/security/principal").header("Origin", "https://untrusted.example")
+			.header("Access-Control-Request-Method", "POST")
+			.header("Access-Control-Request-Headers", "Authorization,Content-Type"));
+		assertEquals(403, response.statusCode());
+		assertTrue(response.headers().firstValue("access-control-allow-origin").isEmpty());
+	}
+
+	@Test
 	void unlistedCorsHeaderAndBareOptionsAreRejected() throws Exception {
-		var response = send(request("OPTIONS", "/security/principal").header("Origin", "https://one.example")
+		var response = send(request("OPTIONS", "/security/principal").header("Origin", ALLOWED_ORIGIN)
 			.header("Access-Control-Request-Method", "POST").header("Access-Control-Request-Headers", "X-Unlisted"));
 		assertEquals(403, response.statusCode());
 		assertTrue(response.headers().firstValue("access-control-allow-origin").isEmpty());
@@ -234,7 +243,7 @@ class SecurityIntegrationTests {
 	}
 
 	private void assertCors(HttpResponse<String> response) {
-		assertEquals("*", response.headers().firstValue("access-control-allow-origin").orElseThrow());
+		assertEquals(ALLOWED_ORIGIN, response.headers().firstValue("access-control-allow-origin").orElseThrow());
 		assertTrue(response.headers().firstValue("access-control-allow-credentials").isEmpty());
 	}
 

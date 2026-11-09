@@ -53,7 +53,7 @@ class SecurityConfiguration {
 	@Bean
 	UrlBasedCorsConfigurationSource corsConfigurationSource() {
 		var cors = new CorsConfiguration();
-		cors.setAllowedOrigins(List.of("*"));
+		cors.setAllowedOrigins(List.of("https://marshrnello.cloud"));
 		cors.setAllowCredentials(false);
 		cors.setAllowedMethods(List.of("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
 		cors.setAllowedHeaders(List.of("Authorization", "Content-Type"));
